@@ -1,0 +1,13 @@
+# Data and model files (large, rebuilt by scripts)
+name_dataset/
+data/
+*.npy
+*.npz
+*.csv
+first_names.txt
+last_names.txt
+noms2008nat_txt.txt
+
+.DS_Store
+__pycache__/
+.venv/
