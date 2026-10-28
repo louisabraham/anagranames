@@ -10,4 +10,9 @@ noms2008nat_txt.txt
 
 .DS_Store
 __pycache__/
-.venv/
+.venv*/
+models/
+
+# Built by web/build.mjs
+web/anagram.js
+web/world_model.pdf

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANAGRANAME</title>
+<meta name="description" content="Doppelgängers don't exist. But what about anagranames? People whose name has the same letters as yours.">
+<link rel="stylesheet" href="style.css">
+<script type="module">
+// The build version (data/version.json, written by web/build.mjs) is in the address of app.js and of the files
+// that it loads. A browser asks the server for the version each time, so it never mixes two builds.
+const { version } = await (await fetch("data/version.json", { cache: "no-cache" })).json();
+document.querySelector('link[rel="stylesheet"]').href = `style.css?v=${version}`;
+await import(`./app.js?v=${version}`);
+</script>
+</head>
+<body>
+<nav><span>Anagrams of names</span><a href="methodology.html">Methodology</a></nav>
+<h1>ANAGRA&shy;NAME</h1>
+<p class="lede">Doppelgängers don't exist. But what about anagranames?<br>People whose name has the same letters as yours.</p>
+<main>
+  <label for="q" class="visually-hidden">Your first and last name</label>
+  <input id="q" type="text" placeholder="MARIE CURIE" autocomplete="off" autocapitalize="words" spellcheck="false" autofocus>
+  <div class="bar">
+    <div class="combo">
+      <label for="from">In</label>
+      <input id="from" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="from-list"
+        autocomplete="off" spellcheck="false">
+      <ul id="from-list" role="listbox" aria-label="Countries" hidden></ul>
+    </div>
+    <span id="status" aria-live="polite"></span>
+  </div>
+  <p id="headline" hidden></p>
+  <p id="origin" hidden></p>
+  <ol id="results" class="results"></ol>
+  <button id="more" type="button" hidden>More</button>
+</main>
+<footer>
+  The search runs in your browser: the name you type is not sent anywhere.
+  <a href="methodology.html">Methodology</a> &middot; <a href="world_model.pdf">Paper (PDF)</a>
+</footer>
+</body>
+</html>

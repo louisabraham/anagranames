@@ -1,0 +1,42 @@
+[
+ {
+  "country": "FR",
+  "train_people": 13924722,
+  "names": 1135138,
+  "null": 28.008899223291376,
+  "gain_country_model": 0.7740164079085083,
+  "gain_world_model": 0.2017432351561439
+ },
+ {
+  "country": "PL",
+  "train_people": 1925297,
+  "names": 151329,
+  "null": 22.450980320727545,
+  "gain_country_model": -0.023018884745830803,
+  "gain_world_model": -0.4929362146317544
+ },
+ {
+  "country": "MX",
+  "train_people": 9307751,
+  "names": 609138,
+  "null": 23.16654888863979,
+  "gain_country_model": 0.02932397210133786,
+  "gain_world_model": -0.11456604710867424
+ },
+ {
+  "country": "TR",
+  "train_people": 13511800,
+  "names": 442789,
+  "null": 22.96778658374058,
+  "gain_country_model": 0.2726450487818042,
+  "gain_world_model": -0.11567860523458151
+ },
+ {
+  "country": "SA",
+  "train_people": 13287899,
+  "names": 1095832,
+  "null": 26.412254401056458,
+  "gain_country_model": 2.0472265329138395,
+  "gain_world_model": 1.1804970124813465
+ }
+]

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANAGRANAME: a name</title>
+<meta name="description" content="People with a first name, a last name or a full name, per country.">
+<link rel="stylesheet" href="style.css">
+<script type="module">
+// As in index.html: the build version is in the address of each file.
+const { version } = await (await fetch("data/version.json", { cache: "no-cache" })).json();
+document.querySelector('link[rel="stylesheet"]').href = `style.css?v=${version}`;
+await import(`./name.js?v=${version}`);
+</script>
+</head>
+<body>
+<nav><a href="./">&larr; Search</a><a href="methodology.html">Methodology</a></nav>
+<h1 id="title"></h1>
+<main class="prose">
+  <p id="summary" class="lede">Loading...</p>
+  <p id="links"></p>
+  <table id="countries" hidden>
+    <thead><tr><th>Country</th><th class="num">People</th><th class="num">Share</th><th class="share"></th></tr></thead>
+    <tbody></tbody>
+  </table>
+</main>
+<footer><a href="methodology.html">Methodology</a> &middot; <a href="world_model.pdf">Paper (PDF)</a></footer>
+</body>
+</html>

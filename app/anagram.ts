@@ -1,0 +1,644 @@
+// Anagram search for full names, ranked by a pair model. TypeScript version of app/anagram.py: same packs
+// (app/data/, written by export_app.py), same algorithm, same results. The comments in app/anagram.py give the
+// search and the formulas; export_app.py gives the pack format. No dependencies: runs in Node 22.18+, Deno, Bun
+// and browsers. Model.load() takes the bytes of a pack file (gzip or not): node:fs in app/cli.ts, fetch in a browser.
+
+export interface Result {
+  first: string;
+  last: string;
+  country: string; // the given country, or the country with the largest term of the mixture
+  logP: number; // natural logarithm of the probability of the full name
+  real: number; // people with this full name in the pack countries (0: none)
+  firstPeople: number; // people with the first name in the world
+  firstCountries: [string, number][]; // [country, people] of the first name in the pack countries, most people first
+  lastPeople: number;
+  lastCountries: [string, number][];
+  realCountries: [string, number][]; // [country, people] of the full name in the pack countries
+}
+
+interface RealName {
+  people: number;
+  countries: [number, number][]; // [pack country, people]
+}
+
+export interface Origin {
+  country: string;
+  p: number;
+}
+
+export interface Search {
+  query: string;
+  country: string | null;
+  found: number;
+  realNames: number; // results that are real full names
+  realPeople: number; // people with these real full names
+  origin: Origin[] | null; // most probable countries of the query name
+  results: Result[];
+}
+
+interface SideMeta {
+  names: number;
+  nodes: number;
+  people: number[];
+  prior_norm: number;
+  groups: number;
+  group_size: number;
+  chunk?: number; // world pack: names per chunk file
+}
+
+interface Meta {
+  version: number;
+  source: string;
+  countries: string[];
+  people: number[];
+  population: number[];
+  alpha: number;
+  log_z: number[];
+  gates: number[][];
+  offsets: number[];
+  letters: Record<string, string>;
+  alphabet: string; // the 26 letters in the order of the signatures, the rarest first
+  min_first?: number; // the count filter of the data (prepare_world.py): people with a name in the world
+  min_last?: number;
+  pairs: number;
+  parts?: number; // world packs: the real full names are in parts (export_app.py)
+  part_hash?: number[];
+  sections: Record<string, [number, number]>;
+  first: SideMeta;
+  last: SideMeta;
+}
+
+interface Entry {
+  x: Float64Array; // X[id, c] for all pack countries
+  seen: Uint8Array; // 1 if the name is seen in country c
+  vec: Float64Array | null; // null for names without a vector (the null score)
+}
+
+type Section = (name: string) => Uint8Array;
+
+/** Values of concatenated LEB128 varints, written to out. */
+function varints<T extends Uint32Array | Float64Array>(b: Uint8Array, out: T): T {
+  let v = 0, scale = 1, k = 0;
+  for (let i = 0; i < b.length; i++) {
+    v += (b[i] & 0x7f) * scale;
+    if (b[i] < 0x80) {
+      out[k++] = v;
+      v = 0;
+      scale = 1;
+    } else scale *= 128;
+  }
+  return out;
+}
+
+/** A probability as "1 in N" (N in millions, billions or trillions when large). */
+export function oneIn(logP: number): string {
+  const x = Math.exp(-logP);
+  for (const [unit, word] of [[1e12, "trillion"], [1e9, "billion"], [1e6, "million"]] as const) {
+    if (x >= unit) return `1 in ${(x / unit).toFixed(1)} ${word}`;
+  }
+  return `1 in ${Math.round(x).toLocaleString("en-US")}`;
+}
+
+async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
+  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes;
+  const stream = new Blob([bytes as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function logSumExp(t: Float64Array): number {
+  let max = -Infinity, sum = 0;
+  for (const x of t) max = Math.max(max, x);
+  for (const x of t) sum += Math.exp(x - max);
+  return max + Math.log(sum);
+}
+
+function f32(b: Uint8Array): Float32Array {
+  if (b.byteOffset % 4) b = b.slice();
+  return new Float32Array(b.buffer, b.byteOffset, b.byteLength / 4);
+}
+
+/** Key letters (0 to 25) of each code point below 0x2000: ASCII letters, then the pack rules. */
+function letterTable(letters: Record<string, string>): number[][] {
+  const table: number[][] = Array.from({ length: 0x2000 }, () => []);
+  for (let k = 0; k < 26; k++) table[65 + k] = table[97 + k] = [k];
+  for (const [cp, key] of Object.entries(letters)) table[Number(cp)] = [...key].map((ch) => ch.charCodeAt(0) - 65);
+  return table;
+}
+
+export const CHUNK_SECTIONS = ["names", "entries", "country", "count", "vec", "codes"];
+
+/** The data of names start to start + n - 1 of a side: display forms, people per country, vectors. */
+class Chunk {
+  readonly bytes: Uint8Array;
+  readonly start: Uint32Array; // name i is bytes[start[i], start[i + 1] - 1)
+  readonly ptr: Uint32Array;
+  readonly country: Uint8Array;
+  readonly count: Uint32Array;
+  readonly row: Int32Array; // row of name i in codes, -1 without a vector
+  readonly codes: Uint8Array;
+
+  /** The n names and their sections CHUNK_SECTIONS. */
+  constructor(n: number, [names, entries, country, count, vec, codes]: Uint8Array[]) {
+    this.bytes = names;
+    this.start = new Uint32Array(n + 1);
+    for (let i = 0, id = 0; id < n; i++) if (names[i] === 10) this.start[++id] = i + 1;
+    const lens = varints(entries, new Uint32Array(n));
+    this.ptr = new Uint32Array(n + 1);
+    for (let i = 0; i < n; i++) this.ptr[i + 1] = this.ptr[i] + lens[i];
+    this.country = country;
+    this.count = varints(count, new Uint32Array(this.ptr[n]));
+    this.row = new Int32Array(n);
+    for (let i = 0, r = 0; i < n; i++) this.row[i] = (vec[i >> 3] >> (7 - (i & 7))) & 1 ? r++ : -1;
+    this.codes = codes;
+  }
+}
+
+/** The first or the last names of a pack: signature trie, people, and the data of the names in chunks (one chunk
+ * for all names, or chunk files of the world pack read with Model.addChunk). */
+class Side {
+  readonly n: number;
+  readonly letters: Uint8Array; // index of the letter of each node in the pack alphabet
+  readonly end: Uint32Array; // first node after the subtree
+  readonly nameStart: Uint32Array; // names of node i: nameStart[i] to nameStart[i + 1] - 1
+  readonly total: Float64Array; // people in the model data
+  readonly part: Uint16Array | null = null; // world packs: the sum of part_hash over the letters, modulo parts
+  readonly chunkSize: number;
+  readonly chunks: (Chunk | undefined)[];
+  private readonly alphaPrior: Float64Array; // alpha pi
+  private readonly logNorm: Float64Array; // log(N_c + alpha)
+  private readonly books: Float32Array;
+  private readonly groups: number;
+  private readonly groupSize: number;
+  private readonly decoder = new TextDecoder();
+
+  constructor(meta: Meta, side: "first" | "last", section: Section) {
+    const m = meta[side];
+    const get = (name: string) => section(`${side}.${name}`);
+    const n = (this.n = m.names);
+    this.letters = get("letters");
+    this.end = varints(get("sizes"), new Uint32Array(m.nodes));
+    for (let i = 0; i < m.nodes; i++) this.end[i] += i;
+    const ends = varints(get("ends"), new Uint32Array(m.nodes));
+    this.nameStart = new Uint32Array(m.nodes + 1);
+    for (let i = 0; i < m.nodes; i++) this.nameStart[i + 1] = this.nameStart[i] + ends[i];
+
+    this.chunkSize = m.chunk ?? Math.max(n, 1);
+    this.chunks = m.chunk ? new Array(Math.ceil(n / m.chunk)) : [new Chunk(n, CHUNK_SECTIONS.map(get))];
+    this.total = varints(get("total"), new Float64Array(n));
+    this.alphaPrior = this.total.map((t) => (meta.alpha * (t + 0.5)) / m.prior_norm);
+    if (meta.parts && meta.part_hash) {
+      this.part = new Uint16Array(n);
+      const ends: number[] = [], sums: number[] = []; // the nodes from the root to node i
+      for (let i = 0; i < m.nodes; i++) {
+        while (ends.length && ends[ends.length - 1] <= i) {
+          ends.pop();
+          sums.pop();
+        }
+        const sum = (sums.length ? sums[sums.length - 1] : 0) + meta.part_hash[meta.alphabet.charCodeAt(this.letters[i]) - 65];
+        ends.push(this.end[i]);
+        sums.push(sum);
+        this.part.fill(sum % meta.parts, this.nameStart[i], this.nameStart[i + 1]);
+      }
+    }
+    this.logNorm = Float64Array.from(m.people, (p) => Math.log(p + meta.alpha));
+    this.books = f32(get("books"));
+    this.groups = m.groups;
+    this.groupSize = m.group_size;
+  }
+
+  /** The chunk of name id and the index of the name in it; the chunk must be read. */
+  private at(id: number): [Chunk, number] {
+    const c = Math.floor(id / this.chunkSize);
+    const chunk = this.chunks[c];
+    if (!chunk) throw new Error(`chunk ${c} of the names is not read`);
+    return [chunk, id - c * this.chunkSize];
+  }
+
+  /** [pack country, people] of name id. */
+  countries(id: number): [number, number][] {
+    const [k, i] = this.at(id);
+    const out: [number, number][] = [];
+    for (let e = k.ptr[i]; e < k.ptr[i + 1]; e++) out.push([k.country[e], k.count[e]]);
+    return out;
+  }
+
+  name(id: number): string {
+    const [k, i] = this.at(id);
+    return this.decoder.decode(k.bytes.subarray(k.start[i], k.start[i + 1] - 1));
+  }
+
+  /** The trie node of the signature with the letter counts rest (in the order of the alphabet), or -1. */
+  find(rest: Int32Array): number {
+    let node = -1, i = 0, end = this.letters.length; // the children of node are the nodes i, this.end[i], ... before end
+    for (let x = 0; x < 26; x++) {
+      for (let t = 0; t < rest[x]; t++) {
+        while (i < end && this.letters[i] < x) i = this.end[i];
+        if (i === end || this.letters[i] !== x) return -1;
+        node = i;
+        end = this.end[i];
+        i++;
+      }
+    }
+    return node;
+  }
+
+  entry(id: number): Entry {
+    const [k, i] = this.at(id);
+    const C = this.logNorm.length;
+    const a = this.alphaPrior[id];
+    const x = new Float64Array(C);
+    const seen = new Uint8Array(C);
+    for (let c = 0; c < C; c++) x[c] = Math.log(a) - this.logNorm[c]; // -Infinity when alpha = 0
+    for (let e = k.ptr[i]; e < k.ptr[i + 1]; e++) {
+      const c = k.country[e];
+      x[c] = Math.log(k.count[e] + a) - this.logNorm[c];
+      seen[c] = 1;
+    }
+    const r = k.row[i];
+    if (r < 0) return { x, seen, vec: null };
+    const g = this.groupSize;
+    const vec = new Float64Array(this.groups * g);
+    for (let j = 0; j < this.groups; j++) {
+      const at = (j * 256 + k.codes[r * this.groups + j]) * g;
+      for (let t = 0; t < g; t++) vec[j * g + t] = this.books[at + t];
+    }
+    return { x, seen, vec };
+  }
+}
+
+export class Model {
+  readonly source: string;
+  readonly countries: string[];
+  readonly first: Side;
+  readonly last: Side;
+  readonly minFirst: number; // the data keeps the first names of at least minFirst people in the world
+  readonly minLast: number;
+  private readonly pairKey: Float64Array; // first id * number of last names + last id, increasing
+  private readonly pairCount: Float64Array;
+  readonly parts: number; // parts of the real full names, 0 when they are in the pack
+  private readonly partHash: number[];
+  private readonly partCache = new Map<number, Map<number, RealName>>(); // part -> key -> people
+  private classes: { byRank: Uint32Array; byClass: Uint32Array; classStart: Uint32Array } | null = null;
+  private readonly logW: Float64Array;
+  private readonly logZ: Float64Array;
+  private readonly gates: Float64Array; // (C, k)
+  private readonly offsets: Float64Array;
+  private readonly k: number;
+  private readonly table: number[][];
+  private readonly rank = new Uint8Array(26); // index of each letter A-Z in the pack alphabet
+
+  private constructor(meta: Meta, section: Section) {
+    this.source = meta.source;
+    this.countries = meta.countries;
+    const total = meta.population.reduce((s, p) => s + p, 0);
+    this.logW = Float64Array.from(meta.population, (p) => Math.log(p / total));
+    this.logZ = Float64Array.from(meta.log_z);
+    this.gates = Float64Array.from(meta.gates.flat());
+    this.offsets = Float64Array.from(meta.offsets);
+    this.k = meta.gates[0].length;
+    this.table = letterTable(meta.letters);
+    for (let i = 0; i < 26; i++) this.rank[meta.alphabet.charCodeAt(i) - 65] = i;
+    this.first = new Side(meta, "first", section);
+    this.last = new Side(meta, "last", section);
+    this.minFirst = meta.min_first ?? 0;
+    this.minLast = meta.min_last ?? 0;
+    this.parts = meta.parts ?? 0;
+    this.partHash = meta.part_hash ?? [];
+    const pairs = this.parts ? 0 : meta.pairs;
+    this.pairKey = pairs ? varints(section("pairs.key"), new Float64Array(pairs)) : new Float64Array(0);
+    for (let i = 1; i < pairs; i++) this.pairKey[i] += this.pairKey[i - 1];
+    this.pairCount = pairs ? varints(section("pairs.count"), new Float64Array(pairs)) : new Float64Array(0);
+  }
+
+  /** The model of a pack file. */
+  static async load(bytes: Uint8Array): Promise<Model> {
+    bytes = await gunzip(bytes);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const n = view.getUint32(8, true);
+    if (new TextDecoder().decode(bytes.subarray(0, 4)) !== "ANAG" || view.getUint32(4, true) !== 1) {
+      throw new Error("not a pack of version 1");
+    }
+    const meta = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + n))) as Meta;
+    const base = 12 + n + ((4 - ((12 + n) % 4)) % 4);
+    const section = (name: string) => {
+      const [at, size] = meta.sections[name];
+      return bytes.subarray(base + at, base + at + size);
+    };
+    return new Model(meta, section);
+  }
+
+  /** log p(f, l | c) */
+  logP(f: Entry, l: Entry, c: number): number {
+    let inter = 0;
+    if (f.seen[c] && l.seen[c]) {
+      let s = 0;
+      if (f.vec && l.vec) for (let j = 0; j < this.k; j++) s += f.vec[j] * l.vec[j] * this.gates[c * this.k + j];
+      inter = s + this.offsets[c];
+    }
+    return f.x[c] + l.x[c] + inter - this.logZ[c];
+  }
+
+  /** The part of the real full names with the letters of the query; null when the pack has no parts. */
+  partOf(query: string): number | null {
+    if (!this.parts) return null;
+    let sum = 0;
+    for (const ch of this.key(query)) sum += this.partHash[ch.charCodeAt(0) - 65];
+    return sum % this.parts;
+  }
+
+  /** The part of the full name (f, l). */
+  pairPart(f: number, l: number): number {
+    return (this.first.part![f] + this.last.part![l]) % this.parts;
+  }
+
+  /** The file of part j in the directory <pack>.real/ */
+  partFile(j: number): string {
+    return `${j.toString(16).padStart(3, "0")}.gz`;
+  }
+
+  hasPart(j: number): boolean {
+    return this.partCache.has(j);
+  }
+
+  /** Read the bytes of the file of part j. */
+  async addPart(j: number, bytes: Uint8Array): Promise<void> {
+    bytes = await gunzip(bytes);
+    let n = 0;
+    for (const b of bytes) if (b < 0x80) n++;
+    const v = varints(bytes, new Float64Array(n));
+    if (!this.classes) {
+      const F = this.first, L = this.last;
+      const byRank = Uint32Array.from(F.total.keys()).sort((a, b) => F.total[b] - F.total[a] || a - b);
+      const part = L.part!;
+      const byClass = Uint32Array.from(L.total.keys()).sort((a, b) => part[a] - part[b] || L.total[b] - L.total[a] || a - b);
+      const classStart = new Uint32Array(this.parts + 1);
+      for (const l of byClass) classStart[part[l] + 1]++;
+      for (let c = 0; c < this.parts; c++) classStart[c + 1] += classStart[c];
+      this.classes = { byRank, byClass, classStart };
+    }
+    const { byRank, byClass, classStart } = this.classes;
+    const out = new Map<number, RealName>();
+    const m = v[0];
+    for (let i = 1, e = 1 + 3 * m, row = 0, col = 0; i < 1 + 3 * m; i += 3) {
+      if (i === 1 || v[i] > 0) [row, col] = [row + v[i], v[i + 1]];
+      else col += 1 + v[i + 1];
+      const f = byRank[row];
+      const l = byClass[classStart[(j - this.first.part![f] + this.parts) % this.parts] + col];
+      const name: RealName = { people: 0, countries: [] };
+      for (let k = 0, c = -1; k <= v[i + 2]; k++, e += 2) {
+        c += v[e] + 1;
+        name.countries.push([c, v[e + 1] + 1]);
+        name.people += v[e + 1] + 1;
+      }
+      out.set(f * this.last.n + l, name);
+    }
+    this.partCache.set(j, out);
+  }
+
+  /** The real full name (f, l) of its part, which must be read first (addPart); undefined if nobody has it. */
+  private realName(f: number, l: number): RealName | undefined {
+    const part = this.partCache.get(this.pairPart(f, l));
+    if (!part) throw new Error(`part ${this.pairPart(f, l)} of the real full names is not read`);
+    return part.get(f * this.last.n + l);
+  }
+
+  /** [country, people] pairs, most people first, then by country code. */
+  private byPeople(pairs: [number, number][]): [string, number][] {
+    return pairs.map(([c, n]): [string, number] => [this.countries[c], n])
+      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  }
+
+  /** Id of the name of a side with the key of the text, or -1. */
+  nameId(side: "first" | "last", text: string): number {
+    return this.lookup(this[side], this.key(text));
+  }
+
+  /** [country, people] of a name in the pack countries (or in pack country c), most people first. */
+  nameCountries(side: "first" | "last", id: number, c = -1): [string, number][] {
+    return this.byPeople(this[side].countries(id).filter(([k]) => c < 0 || k === c));
+  }
+
+  /** [country, people] of the full name (f, l) in the pack countries (or in pack country c), most people first. */
+  realCountries(f: number, l: number, c = -1): [string, number][] {
+    if (!this.parts) {
+      const n = this.real(f, l);
+      return n ? [[this.countries[0], n]] : [];
+    }
+    return this.byPeople((this.realName(f, l)?.countries ?? []).filter(([k]) => c < 0 || k === c));
+  }
+
+  /** People with the full name (f, l) in the pack countries (0: none). With parts, the part of (f, l) must be
+   * read first (addPart). */
+  real(f: number, l: number, c = -1): number {
+    if (this.parts) {
+      const name = this.realName(f, l);
+      return c < 0 ? (name?.people ?? 0) : (name?.countries.find(([k]) => k === c)?.[1] ?? 0);
+    }
+    const k = f * this.last.n + l;
+    let lo = 0, hi = this.pairKey.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.pairKey[mid] < k) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo < this.pairKey.length && this.pairKey[lo] === k ? this.pairCount[lo] : 0;
+  }
+
+  /** The number of each letter of a key, in the order of the pack alphabet. */
+  private counts(key: string): Int32Array {
+    const q = new Int32Array(26);
+    for (const ch of key) q[this.rank[ch.charCodeAt(0) - 65]]++;
+    return q;
+  }
+
+  /** The ids of the names of a side with the letters of the key (the names of one trie node). */
+  private sameLetters(side: Side, key: string): [number, number] {
+    const node = side.find(this.counts(key));
+    return node < 0 ? [0, 0] : [side.nameStart[node], side.nameStart[node + 1]];
+  }
+
+  /** Id of the name with this key, or -1. */
+  private lookup(side: Side, key: string): number {
+    const [a, b] = this.sameLetters(side, key);
+    for (let i = a; i < b; i++) if (this.key(side.name(i)) === key) return i;
+    return -1;
+  }
+
+  /** The chunks with the names ids of a side that are not read yet, added to out as [side, chunk]. */
+  needIds(side: "first" | "last", ids: Iterable<number>, out: [string, number][] = []): [string, number][] {
+    const S = this[side], seen = new Set(out.filter(([s]) => s === side).map(([, c]) => c));
+    for (const id of ids) {
+      const c = Math.floor(id / S.chunkSize);
+      if (!S.chunks[c] && !seen.has(c)) {
+        seen.add(c);
+        out.push([side, c]);
+      }
+    }
+    return out;
+  }
+
+  /** The chunks to read (addChunk) before a search of the query: those of the anagrams and of the names of
+   * the query. Empty for a pack without chunk files. */
+  need(query: string): [string, number][] {
+    const [fs, ls] = this.anagrams(query);
+    const out = this.needIds("last", ls, this.needIds("first", fs));
+    const words = query.split(/\s+/).filter(Boolean);
+    for (let i = 1; i < words.length; i++) {
+      const [a, b] = this.sameLetters(this.first, this.key(words.slice(0, i).join(" ")));
+      const [c, d] = this.sameLetters(this.last, this.key(words.slice(i).join(" ")));
+      this.needIds("first", Array.from({ length: b - a }, (_, k) => a + k), out);
+      this.needIds("last", Array.from({ length: d - c }, (_, k) => c + k), out);
+    }
+    return out;
+  }
+
+  /** The chunks to read before nameId(side, text). */
+  needName(side: "first" | "last", text: string): [string, number][] {
+    const [a, b] = this.sameLetters(this[side], this.key(text));
+    return this.needIds(side, Array.from({ length: b - a }, (_, k) => a + k));
+  }
+
+  /** The file of a chunk in the directory <pack>.names/ */
+  chunkFile(side: string, c: number): string {
+    return `${side}/${c.toString(16).padStart(4, "0")}.gz`;
+  }
+
+  /** Read the bytes of the file of a chunk. */
+  async addChunk(side: "first" | "last", c: number, bytes: Uint8Array): Promise<void> {
+    bytes = await gunzip(bytes);
+    const S = this[side];
+    const lens = new Float64Array(CHUNK_SECTIONS.length);
+    let at = 0;
+    for (let k = 0, v = 0, scale = 1; k < lens.length; at++) {
+      v += (bytes[at] & 0x7f) * scale;
+      if (bytes[at] < 0x80) [lens[k++], v, scale] = [v, 0, 1];
+      else scale *= 128;
+    }
+    const parts = Array.from(lens, (len) => bytes.subarray(at, (at += len)));
+    S.chunks[c] = new Chunk(Math.min(S.chunkSize, S.n - c * S.chunkSize), parts);
+  }
+
+  /** The most probable countries of the query, p(c | f, l), for the split of its words into a first and a last
+   * name of the pack with the largest probability; null if no split gives two names of the pack. */
+  origin(query: string, top = 5): Origin[] | null {
+    const words = query.split(/\s+/).filter(Boolean);
+    let best: Float64Array | null = null, bestLp = -Infinity;
+    for (let i = 1; i < words.length; i++) {
+      const f = this.lookup(this.first, this.key(words.slice(0, i).join(" ")));
+      const l = this.lookup(this.last, this.key(words.slice(i).join(" ")));
+      if (f < 0 || l < 0) continue;
+      const fe = this.first.entry(f), le = this.last.entry(l);
+      const t = Float64Array.from(this.logW, (w, c) => w + this.logP(fe, le, c));
+      const lp = logSumExp(t);
+      if (lp > bestLp) [best, bestLp] = [t, lp];
+    }
+    if (!best) return null;
+    const out = Array.from(best, (x, c) => ({ country: this.countries[c], p: Math.exp(x - bestLp) }));
+    return out.sort((a, b) => b.p - a.p).slice(0, top);
+  }
+
+  /** log p(f, l) under the mixture of the pack countries, and the country with the largest term. */
+  logPMixture(f: Entry, l: Entry): [number, number] {
+    const t = new Float64Array(this.countries.length);
+    let best = 0;
+    for (let c = 0; c < t.length; c++) {
+      t[c] = this.logW[c] + this.logP(f, l, c);
+      if (t[c] > t[best]) best = c;
+    }
+    let sum = 0;
+    for (let c = 0; c < t.length; c++) sum += Math.exp(t[c] - t[best]);
+    return [t[best] + Math.log(sum), best];
+  }
+
+  /** The key of a text: its letters A-Z, accents removed, in upper case (Élodie -> ELODIE). */
+  key(text: string): string {
+    let out = "";
+    for (const ch of text.normalize("NFC")) {
+      const cp = ch.codePointAt(0)!;
+      if (cp < this.table.length) for (const k of this.table[cp]) out += String.fromCharCode(65 + k);
+    }
+    return out;
+  }
+
+  /** All (first name id, last name id) pairs whose letters are the letters of the query. */
+  anagrams(query: string): [number[], number[]] {
+    const q = this.counts(this.key(query));
+    const n = q.reduce((s, x) => s + x, 0);
+    const F = this.first, L = this.last;
+    const used = new Int32Array(26), rest = new Int32Array(26);
+    const pathLetter: number[] = [], pathEnd: number[] = []; // the nodes from the root to node i
+    const fs: number[] = [], ls: number[] = [];
+    for (let i = 0; i < F.letters.length; ) {
+      while (pathEnd.length && i >= pathEnd[pathEnd.length - 1]) {
+        used[pathLetter.pop()!]--;
+        pathEnd.pop();
+      }
+      const x = F.letters[i];
+      if (used[x] === q[x] || pathEnd.length >= n - 2) {
+        i = F.end[i]; // no letter x left, or fewer than 2 letters for the last name
+        continue;
+      }
+      used[x]++;
+      pathLetter.push(x);
+      pathEnd.push(F.end[i]);
+      if (F.nameStart[i + 1] > F.nameStart[i]) {
+        for (let k = 0; k < 26; k++) rest[k] = q[k] - used[k];
+        const node = L.find(rest);
+        if (node >= 0) {
+          for (let f = F.nameStart[i]; f < F.nameStart[i + 1]; f++) {
+            for (let l = L.nameStart[node]; l < L.nameStart[node + 1]; l++) {
+              fs.push(f);
+              ls.push(l);
+            }
+          }
+        }
+      }
+      i++;
+    }
+    return [fs, ls];
+  }
+
+  /** The anagram names of the query: the real full names first (most people first), then the most probable. */
+  search(query: string, country: string | null = null, limit = 20): Search {
+    let [fs, ls] = this.anagrams(query);
+    if (country === null && this.countries.length === 1) country = this.countries[0];
+    const c = country === null ? -1 : this.countries.indexOf(country);
+    if (country !== null && c < 0) throw new Error(`country ${country} is not in the pack`);
+    const firsts = new Map<number, Entry>(), lasts = new Map<number, Entry>();
+    const get = (side: Side, cache: Map<number, Entry>, id: number): Entry => {
+      let e = cache.get(id);
+      if (!e) cache.set(id, (e = side.entry(id)));
+      return e;
+    };
+    if (c >= 0 && this.countries.length > 1) { // a country of the world: the anagrams of the names seen in it
+      const keep = fs.map((f, i) => get(this.first, firsts, f).seen[c] && get(this.last, lasts, ls[i]).seen[c]);
+      [fs, ls] = [fs.filter((_, i) => keep[i]), ls.filter((_, i) => keep[i])];
+    }
+    const k = this.countries.length > 1 ? c : -1; // the country of the people (-1: all the pack)
+    const lp = new Float64Array(fs.length);
+    const best = new Int32Array(fs.length).fill(c);
+    for (let i = 0; i < fs.length; i++) {
+      const f = get(this.first, firsts, fs[i]), l = get(this.last, lasts, ls[i]);
+      if (c >= 0) lp[i] = this.logP(f, l, c);
+      else [lp[i], best[i]] = this.logPMixture(f, l);
+    }
+    const real = Float64Array.from(fs, (f, i) => this.real(f, ls[i], k));
+    const order = Array.from(lp.keys())
+      .sort((a, b) => real[b] - real[a] || lp[b] - lp[a] || fs[a] - fs[b] || ls[a] - ls[b]);
+    const results = order.slice(0, limit).map((i) => ({
+      first: this.first.name(fs[i]),
+      last: this.last.name(ls[i]),
+      country: this.countries[best[i]],
+      logP: lp[i],
+      real: real[i],
+      firstPeople: this.first.total[fs[i]],
+      firstCountries: this.nameCountries("first", fs[i], k),
+      lastPeople: this.last.total[ls[i]],
+      lastCountries: this.nameCountries("last", ls[i], k),
+      realCountries: this.realCountries(fs[i], ls[i], k),
+    }));
+    const realNames = real.reduce((s, x) => s + (x > 0 ? 1 : 0), 0);
+    const realPeople = real.reduce((s, x) => s + x, 0);
+    return { query, country, found: fs.length, realNames, realPeople, origin: this.origin(query), results };
+  }
+}

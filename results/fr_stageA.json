@@ -1,0 +1,131 @@
+[
+ {
+  "name": "null (alpha=10000)",
+  "valid_bits": 28.009204606022365,
+  "test_bits": 28.008899223291376,
+  "per_country": {
+   "FR": 28.008899223291202
+  },
+  "eval_s": 0.03719282150268555
+ },
+ {
+  "name": "counts k=16 wd=0.001 neg=16 unif=0 min_embed=0 steps=10000",
+  "k": 16,
+  "wd": 0.001,
+  "neg_uniform": 0.0,
+  "min_embed": 0,
+  "steps": 10000,
+  "train_s": 287.75484800338745,
+  "valid_bits": 27.780980174323624,
+  "test_bits": 27.779835789209216,
+  "per_country": {
+   "FR": 27.779835789211447
+  },
+  "eval_s": 64.46370506286621
+ },
+ {
+  "name": "counts k=16 wd=0.001 neg=16 unif=0 min_embed=20 steps=10000",
+  "k": 16,
+  "wd": 0.001,
+  "neg_uniform": 0.0,
+  "min_embed": 20,
+  "steps": 10000,
+  "train_s": 358.4476270675659,
+  "valid_bits": 27.46462897607731,
+  "test_bits": 27.463640437576657,
+  "per_country": {
+   "FR": 27.46364043757245
+  },
+  "eval_s": 65.86343121528625
+ },
+ {
+  "name": "counts k=16 wd=0.001 neg=16 unif=0.5 min_embed=0 steps=10000",
+  "k": 16,
+  "wd": 0.001,
+  "neg_uniform": 0.5,
+  "min_embed": 0,
+  "steps": 10000,
+  "train_s": 298.79698514938354,
+  "valid_bits": 27.68004966811463,
+  "test_bits": 27.67849115520211,
+  "per_country": {
+   "FR": 27.678491155201463
+  },
+  "eval_s": 31.48002004623413
+ },
+ {
+  "name": "counts k=16 wd=0.001 neg=16 unif=0.5 min_embed=20 steps=10000",
+  "k": 16,
+  "wd": 0.001,
+  "neg_uniform": 0.5,
+  "min_embed": 20,
+  "steps": 10000,
+  "train_s": 199.3711540699005,
+  "valid_bits": 27.491301518093326,
+  "test_bits": 27.48939573672582,
+  "per_country": {
+   "FR": 27.48939573672402
+  },
+  "eval_s": 31.44535493850708
+ },
+ {
+  "name": "counts k=16 wd=0.01 neg=16 unif=0 min_embed=0 steps=10000",
+  "k": 16,
+  "wd": 0.01,
+  "neg_uniform": 0.0,
+  "min_embed": 0,
+  "steps": 10000,
+  "train_s": 203.25055408477783,
+  "valid_bits": 27.44515617685123,
+  "test_bits": 27.444039604272096,
+  "per_country": {
+   "FR": 27.4440396042717
+  },
+  "eval_s": 30.29663610458374
+ },
+ {
+  "name": "counts k=16 wd=0.01 neg=16 unif=0 min_embed=20 steps=10000",
+  "k": 16,
+  "wd": 0.01,
+  "neg_uniform": 0.0,
+  "min_embed": 20,
+  "steps": 10000,
+  "train_s": 203.69516777992249,
+  "valid_bits": 27.399419383409825,
+  "test_bits": 27.39857096056485,
+  "per_country": {
+   "FR": 27.39857096056863
+  },
+  "eval_s": 30.00956106185913
+ },
+ {
+  "name": "counts k=16 wd=0.01 neg=16 unif=0.5 min_embed=0 steps=10000",
+  "k": 16,
+  "wd": 0.01,
+  "neg_uniform": 0.5,
+  "min_embed": 0,
+  "steps": 10000,
+  "train_s": 204.0172553062439,
+  "valid_bits": 27.442412334793634,
+  "test_bits": 27.441044562445704,
+  "per_country": {
+   "FR": 27.441044562445768
+  },
+  "eval_s": 31.747266054153442
+ },
+ {
+  "name": "counts k=16 wd=0.01 neg=16 unif=0.5 min_embed=20 steps=10000",
+  "k": 16,
+  "wd": 0.01,
+  "neg_uniform": 0.5,
+  "min_embed": 20,
+  "steps": 10000,
+  "train_s": 200.2140920162201,
+  "valid_bits": 27.402954008083857,
+  "test_bits": 27.401302953067074,
+  "per_country": {
+   "FR": 27.401302953067965
+  },
+  "eval_s": 23.768587827682495
+ }
+]

@@ -1,0 +1,229 @@
+<!doctype html>
+<!-- Template for docs/world_model.pdf. make_report.py replaces each @@key@@ and prints the page with Chrome. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A calibrated world model of name pairs</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<style>
+  @page { size: A4; margin: 1.6cm 2.1cm 1.7cm;
+          @bottom-center { content: counter(page); font-family: KaTeX_Main, serif; font-size: 9pt; color: #333; } }
+  :root { color-scheme: light; }
+  body { font-family: KaTeX_Main, "Times New Roman", serif; font-size: 10pt; line-height: 1.34; color: #000;
+         background: #fff; text-align: justify; hyphens: auto; margin: 0; }
+  .katex { font-size: 1.08em; }
+  .katex-display { margin: 0.45em 0; }
+  h1 { font-size: 16.5pt; font-weight: normal; text-align: center; line-height: 1.2; margin: 0 0 0.3em; }
+  .byline { text-align: center; font-size: 10pt; margin-bottom: 1.1em; }
+  .abstract { margin: 0 2.2em 1em; font-size: 9.3pt; }
+  .abstract b { font-variant: small-caps; }
+  h2 { font-size: 11.5pt; margin: 1em 0 0.35em; break-after: avoid; }
+  h3 { font-size: 10pt; margin: 0.75em 0 0.25em; break-after: avoid; }
+  p { margin: 0 0 0.45em; }
+  p + p { text-indent: 1.4em; }
+  figure { margin: 0.7em 0 0.8em; break-inside: avoid; text-align: center; }
+  figure img { display: block; margin: 0 auto; }
+  figcaption { font-size: 8.8pt; text-align: justify; margin-top: 0.3em; }
+  table { border-collapse: collapse; margin: 0.4em auto 0.3em; font-size: 9.3pt; }
+  th, td { padding: 0.18em 0.9em; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  thead tr { border-top: 1.2px solid #000; border-bottom: 0.6px solid #000; }
+  tbody tr:last-child { border-bottom: 1.2px solid #000; }
+  .refs { font-size: 8.8pt; }
+  .refs p { text-indent: 0; padding-left: 1.8em; margin: 0 0 0.2em; position: relative; text-align: left; }
+  .refs span { position: absolute; left: 0; }
+  .avoid { break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<h1>A calibrated world model of first-name and last-name pairs,<br>and its quantization</h1>
+<div class="byline">anagraname &middot; technical report &middot; 24 October 2026</div>
+
+<div class="abstract"><b>Abstract.</b>
+We model the probability that a person in country $c$ has the first name $f$ and the last name $l$, for 105 countries,
+1.7 M first names and 3.5 M last names. The baseline is the independence model <span style="white-space: nowrap">$p(f\mid c)\,p(l\mid c)$</span>. We add a
+low-rank interaction between names with per-country gates, train it with an importance-sampled estimate of the
+partition function, and fit a scale and an offset per country on held-out people. The model is better than
+independence in all 105 countries, with a test gain of @@gain_cal@@ bits per person. Product quantization with one
+byte for each pair of dimensions reduces the name vectors from @@mb_fp32@@ MB to @@mb_pq2@@ MB, for a loss of
+@@loss_pq2@@ bits per person. All countries stay above the baseline.
+</div>
+
+<h2>1&ensp;Introduction</h2>
+<p>An anagram tool for person names must rank many candidate pairs $(f, l)$ by how plausible they are in a given
+country. The independence model is a strong baseline, because most of the information is in the frequencies of the
+two names. The interaction between first and last names is weaker, but it exists: names from the same language or
+community occur together more frequently than independence predicts.</p>
+<p>We have two requirements. (i) The model must not be worse than the baseline in any country: a good world average
+can hide losses in small countries. (ii) The model must be small enough for a web browser. Sections 3 to 5 give the
+model, its training and its calibration, which satisfy (i). Section 7 gives the quantization, which satisfies (ii).</p>
+
+<h2>2&ensp;Data and evaluation</h2>
+<p>The data is name_dataset [1], restricted to names in Latin script after NFC normalization and to names that occur 5
+or more times in the world. It has 187 M unique triples $(c, f, l)$ with a count of people $n_{cfl}$. For each triple we draw
+$n^{\text{test}} \sim \mathrm{Bin}(n_{cfl}, 0.1)$ and $n^{\text{valid}} \sim \mathrm{Bin}(n_{cfl} - n^{\text{test}}, 1/9)$,
+which gives 282 M train, 35 M validation and 35 M test people. The metric is the negative log-likelihood per person
+and the gain over the baseline $p_0$:</p>
+$$L = -\frac{1}{N}\sum_{i=1}^{N} \log_2 p(f_i, l_i \mid c_i), \qquad G = L_0 - L. \tag{1}$$
+<p>The baseline smooths the marginals of each country toward the world marginal $\pi$ with $\alpha$ pseudo-people:</p>
+$$p_0(f, l \mid c) = \hat p(f \mid c)\,\hat p(l \mid c), \qquad \hat p(f \mid c) = \frac{N_{fc} + \alpha\,\pi_f}{N_c + \alpha}, \tag{2}$$
+<p>where $N_{fc}$ counts the train people of country $c$ with first name $f$ (same for $l$). The value
+$\alpha = 10^5$ is the best on the validation split. The baseline has $L_0 = @@null_bits@@$ bits per person on the
+test split.</p>
+
+<h2>3&ensp;Model</h2>
+<p>The model adds an interaction to the baseline, only on the pairs whose two names occur in the train people of
+the country:</p>
+$$\log p(f, l \mid c) = \log p_0(f, l \mid c) + \mathbb{1}[(f, l) \in S_c]\,\bigl(\beta_c\, s_c(f, l) + b_c\bigr) - \log Z_c, \tag{3}$$
+<p>with the score $s_c(f, l) = \sum_{j=1}^{k} g_{cj}\, u_{fj}\, v_{lj}$. The vectors $u_f, v_l \in \mathbb{R}^k$, $k = 16$, are the same in all countries. Only names with $m = 20$ or more
+train people have a vector: 1.34 M of the 5.18 M names. The other names have $u = 0$. The gates
+$g_c \in (0, 1)^k$ let each country use a subset of the dimensions. The set $S_c = F_c \times L_c$ contains the
+pairs of names seen in country $c$; out of $S_c$ the model is the baseline. The scale $\beta_c$ and the offset
+$b_c$ come from the calibration (Section 5); during training, $\beta_c = 1$ and $b_c = 0$. The partition
+function is</p>
+$$Z_c = 1 - P_c + \sum_{(f, l) \in S_c} p_0(f, l \mid c)\, e^{\beta_c s_c(f, l) + b_c}, \qquad P_c = p_0(S_c \mid c). \tag{4}$$
+<p>The sum has $\sum_c |F_c|\,|L_c| = 3.3 \times 10^{12}$ terms. We compute it exactly, in blocks, with MLX [2] on an
+Apple M4 Max GPU in about 3 minutes. All results in this report use the exact $Z_c$.</p>
+
+<h2>4&ensp;Training</h2>
+<p>The training loss is the negative log-likelihood of the train people (in nats). The baseline terms are constant,
+thus</p>
+$$\ell = -\frac{1}{N} \sum_{i} s_{c_i}(f_i, l_i) + \sum_c w_c \log Z_c, \tag{5}$$
+<p>where $w_c$ is the fraction of people from country $c$. The sum in (4) is too large for each step. We write
+$Z_c = 1 - P_c + P_c\, \mathbb{E}_{p_0(\cdot \mid S_c)}[e^{s}]$ and estimate the expectation by self-normalized
+importance sampling [7], with $J = 4096$ samples per country and per step:</p>
+$$\begin{aligned}
+\mathbb{E}_{p_0(\cdot \mid S_c)}[e^{s}] &\approx \frac{\sum_{j=1}^{J} \omega_j\, e^{s_j}}{\sum_{j=1}^{J} \omega_j},
+\qquad \omega_j = \frac{p_0(f_j, l_j \mid S_c)}{q_c(f_j, l_j)},\\
+q_c &= \tfrac13 \bigl(\hat p_{\text{train}}(\cdot \mid c) + p_0(\cdot \mid S_c) + t_c \otimes t_c\bigr).
+\end{aligned} \tag{6}$$
+<p>The first part of the proposal samples train people, where $e^{s}$ is large. The second part is the target. The
+third part samples each name of country $c$ in proportion to its number of distinct pairs, which gives more weight to
+rare names. Because $q_c \ge p_0(\cdot \mid S_c)/3$, all weights satisfy $\omega_j \le 3$.</p>
+<p>Two other choices failed. With sampled softmax (InfoNCE [3], 16 negatives), 19 countries were below the baseline,
+also on the train split: the interaction was too strong, and the cause was not overfitting. Without the threshold
+$m$, names with 3 to 9 people received large vectors under Adam, with scores up to 28 on pairs that no sample sees,
+and the estimate (6) was wrong. With $m = 20$, it agrees with the exact $\log Z_c$ within 0.002 in the countries
+that we checked. Settings: batches of
+65,536 people, $10^4$ steps of AdamW (learning rate $10^{-2}$, weight decay 0.1), @@train_min@@ minutes in total.</p>
+
+<h2>5&ensp;Calibration</h2>
+<p>For each country we fit $(\beta_c, b_c)$ on the validation people. With $E = \mathbb{E}_{\text{valid}}[s\,
+\mathbb{1}_S]$ and $Q = P_{\text{valid}}(S_c)$, the validation gain in nats is</p>
+$$G_c(\beta, b) = \beta E + b\, Q - \log\bigl(1 - P_c + e^{b} M_c(\beta)\bigr), \qquad
+M_c(\beta) = \sum_{(f, l) \in S_c} p_0(f, l \mid c)\, e^{\beta s_c(f, l)}. \tag{7}$$
+<p>For a fixed $\beta$, $G_c$ is concave in $b$, with its maximum at</p>
+$$e^{b^\star} = \frac{Q\,(1 - P_c)}{(1 - Q)\, M_c(\beta)}. \tag{8}$$
+<p>One exact pass per country gives the histogram of $s$ weighted by $p_0$ (bins of width 0.01). This gives
+$M_c(\beta)$ for all $\beta$ in $\{0, 0.01, \dots, 2\}$, and we keep the best pair, with $b$ clipped to $[-3, 3]$.
+Because $(\beta, b) = (0, 0)$ is the baseline, the fitted validation gain is never negative. This is a per-country
+form of temperature scaling [4]. The median $\beta_c$ is @@beta_median@@, and $\beta_c &lt; 1$ in @@beta_lt1@@ of the
+105 countries: the trained interaction is too strong in most countries.</p>
+
+<h2>6&ensp;Results</h2>
+<div class="avoid">
+<p>Table 1 shows the effect of each step. The calibration removes the last countries below the baseline and also
+increases the mean gain. Figure 1 shows the countries with the lowest gain before the calibration.</p>
+<table>
+  <thead><tr><th>Model</th><th>Test gain (bits/person)</th><th>Countries below baseline</th></tr></thead>
+  <tbody>
+    <tr><td>Shared vectors, sampled softmax</td><td>@@gain_shared@@</td><td>@@below_shared@@</td></tr>
+    <tr><td>+ country gates</td><td>@@gain_gated@@</td><td>@@below_gated@@</td></tr>
+    <tr><td>+ importance-sampled $\log Z_c$, $m = 20$</td><td>@@gain_raw@@</td><td>@@below_raw@@</td></tr>
+    <tr><td>+ calibration</td><td><b>@@gain_cal@@</b></td><td><b>@@below_cal@@</b></td></tr>
+  </tbody>
+</table>
+<div style="text-align:center; font-size: 8.8pt; margin-bottom: 0.6em">Table 1. Test gain over the baseline (105 countries, 35 M people).</div>
+</div>
+<figure>
+  <img src="fig_countries.svg" style="width: 100%">
+  <figcaption><b>Figure 1.</b> Test gain of the 25 countries with the lowest gain before the calibration (open
+  circles) and after it (dots). The lowest country after the calibration is @@low_cal@@.</figcaption>
+</figure>
+
+<h2>7&ensp;Quantization</h2>
+<p>Only the name vectors need compression: $U$ and $V$ have 1.34 M rows of $k = 16$ numbers, @@mb_fp32@@ MB in
+float32. The gates and offsets are $105 \times 17$ numbers. A bit mask of the 5.18 M names (0.65 MB) tells which
+names have a vector.</p>
+
+<h3>7.1&ensp;Cost of an error on the vectors</h3>
+<p>Quantization changes the scores by $\delta = \hat s - s$. For one country, the change of the loss is exactly</p>
+$$\Delta L = -\,\mathbb{E}_{\text{data}}[\delta] + \log \mathbb{E}_{p}\bigl[e^{\delta}\bigr]
+= \bigl(\mathbb{E}_{p}[\delta] - \mathbb{E}_{\text{data}}[\delta]\bigr) + \tfrac12 \operatorname{Var}_{p}(\delta) + O(\delta^3), \tag{9}$$
+<p>where $p$ is the model. Let $\varepsilon_f = \hat u_f - u_f$ and $\eta_l = \hat v_l - v_l$. To first order, the
+first term of (9) is $\sum_f \varepsilon_f^{\top} \nabla_{u_f} \ell + \sum_l \eta_l^{\top} \nabla_{v_l} \ell$, which is
+zero at a stationary point of the likelihood. If the errors of different names are independent with mean zero,</p>
+$$\Delta L \approx \tfrac12 \sum_f p(f)\, \varepsilon_f^{\top} A_f\, \varepsilon_f + \tfrac12 \sum_l p(l)\, \eta_l^{\top} B_l\, \eta_l,
+\qquad A_f = \mathbb{E}_p\bigl[(\beta g \odot v_l)(\beta g \odot v_l)^{\top} \bigm| f\bigr], \tag{10}$$
+<p>and $B_l$ is the same with the roles of $u$ and $v$ exchanged. The cost of an error on a name is proportional to
+the frequency of the name. With $A_f \approx a I$, all the methods below minimize the error weighted by the count
+$w_i$ of train people of each name $i$ (row $W_i$ of $U$ or $V$):</p>
+$$D(\hat W) = \sum_i w_i\, \lVert \hat W_i - W_i \rVert^2. \tag{11}$$
+<p>Equation (10) is an approximation: the weight decay and the calibration move the model away from the stationary
+point.</p>
+
+<h3>7.2&ensp;Scalar quantization</h3>
+<p>Each dimension $j$ has one scale. With $b$ bits and $r = 2^{b-1} - 1$ [5],</p>
+$$\Delta_j = \frac{\gamma_j \max_i |W_{ij}|}{r}, \qquad
+q_{ij} = \operatorname{clip}\Bigl(\operatorname{round}\frac{W_{ij}}{\Delta_j},\, -r,\, r\Bigr), \qquad
+\hat W_{ij} = \Delta_j\, q_{ij}, \tag{12}$$
+<p>where the clip factor $\gamma_j \in \{0.4, 0.5, \dots, 1\}$ minimizes the term $j$ of (11). Without clipping, the
+error is uniform on $[-\Delta_j/2, \Delta_j/2]$ with variance $\Delta_j^2/12$, thus by (10) $\Delta L \propto \Delta^2$.
+From 8 to 4 bits, $\Delta_j$ increases by about $127/7 \approx 18$, and (10) predicts a factor of about 330 on
+$\Delta L$. We measure @@loss_int8@@ and @@loss_int4@@ bits per person: a factor of @@ratio_int@@. The cost is
+$bk/8$ bytes per name.</p>
+
+<h3>7.3&ensp;Product quantization</h3>
+<p>Product quantization [6] cuts the $k$ dimensions into $k/g$ groups of $g$. Each group $m$ has a codebook
+$C^{(m)} \in \mathbb{R}^{256 \times g}$, and each name stores one byte per group:</p>
+$$a_{im} = \arg\min_{a}\, \bigl\lVert W_i^{(m)} - C_a^{(m)} \bigr\rVert^2, \qquad
+\hat W_i = \bigl(C^{(1)}_{a_{i1}}, \dots, C^{(k/g)}_{a_{i,k/g}}\bigr). \tag{13}$$
+<p>The codebooks minimize (11) by weighted Lloyd iterations, from 256 rows drawn with probability proportional to
+$w_i$ (25 iterations):</p>
+$$C_a^{(m)} \leftarrow \frac{\sum_{i:\, a_{im} = a} w_i\, W_i^{(m)}}{\sum_{i:\, a_{im} = a} w_i}. \tag{14}$$
+<p>The rate is $8/g$ bits per dimension. For $g = 2$ it is the same as 4-bit scalar quantization, but the 256
+centroids follow the weighted joint density of the two dimensions, while the scalar grid puts its $15 \times 15$
+cells on a square, many of them in empty regions. The loss is @@loss_pq2@@ bits per person, against @@loss_int4@@
+for 4-bit scalar quantization. With $g = 4$ and $g = 8$ the loss is @@loss_pq4@@ and @@loss_pq8@@.</p>
+
+<h3>7.4&ensp;Truncation</h3>
+<p>The last method keeps the vectors of the $n$ most frequent names only. The other names share the weighted mean
+$\bar W = \sum_i w_i W_i / \sum_i w_i$, which keeps their mean interaction. By (10), these names have a small
+$p(f)$, thus their error costs little. With 4-bit vectors for the top 50 % of the names (@@mb_top50@@ MB), the
+loss is @@loss_top50@@, less than product quantization with $g = 4$ at the same size.</p>
+
+<h3>7.5&ensp;Choice</h3>
+<figure>
+  <img src="fig_quant.svg" style="width: 82%">
+  <figcaption><b>Figure 2.</b> Test gain against the size of the name vectors. The dashed line is float32. Every
+  variant keeps all 105 countries above the baseline.</figcaption>
+</figure>
+<p>Figure 2 shows the trade-off. Float16 and int8 have no measurable loss. At 11 MB, product quantization with
+$g = 2$ is better than 4-bit scalar quantization. Below 6 MB, truncation is the best method. We choose product quantization with $g = 2$, the
+smallest variant with a loss of 0.01 bits per person or less. The file, with codebooks, bit masks, gates and
+offsets, has @@file_mb@@ MB. Its exact test gain is @@gain_file@@ bits per person, and no country is below the
+baseline. The smallest variant (@@mb_small@@ MB) still has a gain of @@gain_small@@, more than the float32 model
+trained with sampled softmax.</p>
+
+<h2>8&ensp;Limitations</h2>
+<p>The sizes do not include the count tables of the baseline, which the browser also needs. We did not test product
+quantization together with truncation. Some model choices were made with the test results visible, thus a small
+selection bias is possible.</p>
+
+<h2>References</h2>
+<div class="refs">
+<p><span>[1]</span> P. Remy. name-dataset. github.com/philipperemy/name-dataset, 2021.</p>
+<p><span>[2]</span> A. Hannun, J. Digani, A. Katharopoulos, R. Collobert. MLX: efficient and flexible machine learning on Apple silicon. github.com/ml-explore/mlx, 2023.</p>
+<p><span>[3]</span> A. van den Oord, Y. Li, O. Vinyals. Representation learning with contrastive predictive coding. arXiv:1807.03748, 2018.</p>
+<p><span>[4]</span> C. Guo, G. Pleiss, Y. Sun, K. Q. Weinberger. On calibration of modern neural networks. ICML, 2017.</p>
+<p><span>[5]</span> R. Krishnamoorthi. Quantizing deep convolutional networks for efficient inference: a whitepaper. arXiv:1806.08342, 2018.</p>
+<p><span>[6]</span> H. Jégou, M. Douze, C. Schmid. Product quantization for nearest neighbor search. IEEE TPAMI 33(1):117&ndash;128, 2011.</p>
+<p><span>[7]</span> Y. Bengio, J.-S. Senécal. Adaptive importance sampling to accelerate training of a neural probabilistic language model. IEEE Trans. Neural Networks 19(4):713&ndash;722, 2008.</p>
+</div>
+
+</body>
+</html>

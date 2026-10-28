@@ -1,0 +1,86 @@
+[
+ {
+  "valid_bits": 28.009204606022365,
+  "test_bits": 28.008899223291376,
+  "per_country": {
+   "FR": 28.008899223291202
+  },
+  "eval_s": 0.3183779716491699,
+  "name": "null (no embeddings)",
+  "bytes_per_name": 0,
+  "n_stored": 0,
+  "mb": 0.0
+ },
+ {
+  "valid_bits": 27.40777607776092,
+  "test_bits": 27.406764544466,
+  "per_country": {
+   "FR": 27.40676454446541
+  },
+  "eval_s": 58.61177611351013,
+  "name": "float32",
+  "bytes_per_name": 32,
+  "n_stored": 1135138,
+  "mb": 36.324416
+ },
+ {
+  "valid_bits": 27.42738736383684,
+  "test_bits": 27.42644741852176,
+  "per_country": {
+   "FR": 27.42644741852139
+  },
+  "eval_s": 65.92993688583374,
+  "name": "int4 per column",
+  "bytes_per_name": 4.0,
+  "n_stored": 1135138,
+  "mb": 4.540552
+ },
+ {
+  "valid_bits": 27.516920389150744,
+  "test_bits": 27.516086072594952,
+  "per_country": {
+   "FR": 27.516086072593875
+  },
+  "eval_s": 63.19161891937256,
+  "name": "int4, top 50% of names",
+  "bytes_per_name": 4.0,
+  "n_stored": 567571,
+  "mb": 2.270284
+ },
+ {
+  "valid_bits": 27.649447013588098,
+  "test_bits": 27.649158993145583,
+  "per_country": {
+   "FR": 27.649158993145768
+  },
+  "eval_s": 54.59363102912903,
+  "name": "int4, top 25% of names",
+  "bytes_per_name": 4.0,
+  "n_stored": 283786,
+  "mb": 1.135144
+ },
+ {
+  "valid_bits": 27.83006516645956,
+  "test_bits": 27.828608556263074,
+  "per_country": {
+   "FR": 27.828608556261702
+  },
+  "eval_s": 55.904632806777954,
+  "name": "int4, top 10% of names",
+  "bytes_per_name": 4.0,
+  "n_stored": 113515,
+  "mb": 0.45406
+ },
+ {
+  "valid_bits": 27.960016454016404,
+  "test_bits": 27.957587764237374,
+  "per_country": {
+   "FR": 27.957587764235324
+  },
+  "eval_s": 55.07350301742554,
+  "name": "int4, top 5% of names",
+  "bytes_per_name": 4.0,
+  "n_stored": 56759,
+  "mb": 0.227036
+ }
+]

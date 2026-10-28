@@ -1,0 +1,191 @@
+[
+ {
+  "name": "null (alpha=10000)",
+  "valid_bits": 28.009204606022365,
+  "test_bits": 28.008899223291376,
+  "per_country": {
+   "FR": 28.008899223291202
+  },
+  "eval_s": 0.03845810890197754
+ },
+ {
+  "name": "counts k=16 wd=0.01 neg=16 unif=0 min_embed=20 steps=5000",
+  "k": 16,
+  "wd": 0.01,
+  "neg_uniform": 0.0,
+  "min_embed": 20,
+  "steps": 5000,
+  "train_s": 27.40111994743347,
+  "valid_bits": 27.395678081791885,
+  "test_bits": 27.393745240099953,
+  "per_country": {
+   "FR": 27.393745240098784
+  },
+  "eval_s": 13.660274982452393
+ },
+ {
+  "name": "counts k=16 wd=0.01 neg=16 unif=0 min_embed=100 steps=5000",
+  "k": 16,
+  "wd": 0.01,
+  "neg_uniform": 0.0,
+  "min_embed": 100,
+  "steps": 5000,
+  "train_s": 27.945028066635132,
+  "valid_bits": 27.586506379188933,
+  "test_bits": 27.583889394618204,
+  "per_country": {
+   "FR": 27.58388939462229
+  },
+  "eval_s": 13.698856115341187
+ },
+ {
+  "name": "counts k=16 wd=0.03 neg=16 unif=0 min_embed=20 steps=5000",
+  "k": 16,
+  "wd": 0.03,
+  "neg_uniform": 0.0,
+  "min_embed": 20,
+  "steps": 5000,
+  "train_s": 28.3694269657135,
+  "valid_bits": 27.374255052199832,
+  "test_bits": 27.372719233707905,
+  "per_country": {
+   "FR": 27.372719233710377
+  },
+  "eval_s": 14.056700944900513
+ },
+ {
+  "name": "counts k=16 wd=0.03 neg=16 unif=0 min_embed=100 steps=5000",
+  "k": 16,
+  "wd": 0.03,
+  "neg_uniform": 0.0,
+  "min_embed": 100,
+  "steps": 5000,
+  "train_s": 30.020975828170776,
+  "valid_bits": 27.58210671804082,
+  "test_bits": 27.579650142023336,
+  "per_country": {
+   "FR": 27.579650142022775
+  },
+  "eval_s": 13.689614057540894
+ },
+ {
+  "name": "counts k=16 wd=0.1 neg=16 unif=0 min_embed=20 steps=5000",
+  "k": 16,
+  "wd": 0.1,
+  "neg_uniform": 0.0,
+  "min_embed": 20,
+  "steps": 5000,
+  "train_s": 28.50811767578125,
+  "valid_bits": 27.3670838232989,
+  "test_bits": 27.36614895758302,
+  "per_country": {
+   "FR": 27.36614895758303
+  },
+  "eval_s": 13.310928106307983
+ },
+ {
+  "name": "counts k=16 wd=0.1 neg=16 unif=0 min_embed=100 steps=5000",
+  "k": 16,
+  "wd": 0.1,
+  "neg_uniform": 0.0,
+  "min_embed": 100,
+  "steps": 5000,
+  "train_s": 27.118837356567383,
+  "valid_bits": 27.582981827876907,
+  "test_bits": 27.580833543415835,
+  "per_country": {
+   "FR": 27.580833543412954
+  },
+  "eval_s": 13.298178911209106
+ },
+ {
+  "name": "counts k=32 wd=0.01 neg=16 unif=0 min_embed=20 steps=5000",
+  "k": 32,
+  "wd": 0.01,
+  "neg_uniform": 0.0,
+  "min_embed": 20,
+  "steps": 5000,
+  "train_s": 45.969006061553955,
+  "valid_bits": 27.487949078369212,
+  "test_bits": 27.48588529496458,
+  "per_country": {
+   "FR": 27.48588529496131
+  },
+  "eval_s": 13.757922887802124
+ },
+ {
+  "name": "counts k=32 wd=0.01 neg=16 unif=0 min_embed=100 steps=5000",
+  "k": 32,
+  "wd": 0.01,
+  "neg_uniform": 0.0,
+  "min_embed": 100,
+  "steps": 5000,
+  "train_s": 45.965556383132935,
+  "valid_bits": 27.598451323661333,
+  "test_bits": 27.5944986813591,
+  "per_country": {
+   "FR": 27.594498681358626
+  },
+  "eval_s": 13.689450979232788
+ },
+ {
+  "name": "counts k=32 wd=0.03 neg=16 unif=0 min_embed=20 steps=5000",
+  "k": 32,
+  "wd": 0.03,
+  "neg_uniform": 0.0,
+  "min_embed": 20,
+  "steps": 5000,
+  "train_s": 45.87277388572693,
+  "valid_bits": 27.421864903148865,
+  "test_bits": 27.420246773342956,
+  "per_country": {
+   "FR": 27.420246773340736
+  },
+  "eval_s": 13.61199688911438
+ },
+ {
+  "name": "counts k=32 wd=0.03 neg=16 unif=0 min_embed=100 steps=5000",
+  "k": 32,
+  "wd": 0.03,
+  "neg_uniform": 0.0,
+  "min_embed": 100,
+  "steps": 5000,
+  "train_s": 45.935888051986694,
+  "valid_bits": 27.583201399449347,
+  "test_bits": 27.57941791517161,
+  "per_country": {
+   "FR": 27.579417915172247
+  },
+  "eval_s": 13.668346166610718
+ },
+ {
+  "name": "counts k=32 wd=0.1 neg=16 unif=0 min_embed=20 steps=5000",
+  "k": 32,
+  "wd": 0.1,
+  "neg_uniform": 0.0,
+  "min_embed": 20,
+  "steps": 5000,
+  "train_s": 45.79365038871765,
+  "valid_bits": 27.374353220565407,
+  "test_bits": 27.373280982990792,
+  "per_country": {
+   "FR": 27.373280982992537
+  },
+  "eval_s": 13.577775955200195
+ },
+ {
+  "name": "counts k=32 wd=0.1 neg=16 unif=0 min_embed=100 steps=5000",
+  "k": 32,
+  "wd": 0.1,
+  "neg_uniform": 0.0,
+  "min_embed": 100,
+  "steps": 5000,
+  "train_s": 46.968464851379395,
+  "valid_bits": 27.57120510962483,
+  "test_bits": 27.567910670194255,
+  "per_country": {
+   "FR": 27.567910670190265
+  },
+  "eval_s": 14.053478956222534
+ }
+]

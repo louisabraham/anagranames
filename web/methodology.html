@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANAGRANAME: methodology</title>
+<meta name="description" content="Data, search and ranking model of ANAGRANAME.">
+<link rel="stylesheet" href="style.css">
+<script type="module">
+const { version } = await (await fetch("data/version.json", { cache: "no-cache" })).json();
+document.querySelector('link[href="style.css"]').href = `style.css?v=${version}`;
+</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]})"></script>
+</head>
+<body>
+<nav><a href="./">&larr; Search</a><a href="world_model.pdf">Paper (PDF)</a></nav>
+<h1>METHOD&shy;OLOGY</h1>
+<main class="prose">
+
+<h2>01 What the page does</h2>
+<p>Doppelgängers don't exist. But what about anagranames: people whose name has the same letters as yours?</p>
+<p>You type a name. The page lists the full names (one first name and one last name) that contain exactly the
+letters of your name. It shows first the full names that real people have, most people first (see 07), then the
+other full names, most probable first. It gives the countries where people with your name live (see 08).</p>
+<p>Each first name and each last name comes from population data. Most pairs of a first name and a last name are
+new, and a model gives the probability of each pair.</p>
+
+<h2>02 Data</h2>
+<p><b>name_dataset</b> [1]: 491,655,925 records (first name, last name, gender, country) from 106 countries,
+extracted from the Facebook leak of 2021 (533 million accounts). We keep the names in Latin script that occur at
+least 5 times in the world, and the people whose two names are kept. This is the only count filter, against fake
+names: the model and all the files keep these names in each country where they occur, and all the full names of
+these people.</p>
+<table>
+<tr><th>Kept</th><td class="num">352,931,936</td><td>people in 105 countries</td></tr>
+<tr><th>First names</th><td class="num">1,724,039</td><td>different keys (see 03)</td></tr>
+<tr><th>Last names</th><td class="num">3,456,059</td><td>different keys</td></tr>
+</table>
+<p><b>INSEE</b>, France only: the first names given to the children born in France from 1900 to 2022 [2], and
+the last names of the people born in France from 1891 to 2000 [3]. These files count each name alone: they give
+no pairs of first and last names. INSEE puts the rare names into one group, which we do not use.</p>
+<table>
+<tr><th>First names</th><td class="num">33,234</td><td>86.4 million births</td></tr>
+<tr><th>Last names</th><td class="num">215,906</td><td>68.0 million people</td></tr>
+</table>
+
+<h2>03 Letters</h2>
+<p>The <b>key</b> of a name is its letters A to Z: the accents are removed, the case is ignored, and the spaces,
+hyphens and apostrophes are removed. Two names are anagrams when their keys contain the same letters. The
+<b>signature</b> of a name is its key with the letters in alphabetical order.</p>
+<table>
+<tr><th>Name</th><th>Key</th><th>Signature</th></tr>
+<tr><td>Élodie</td><td>ELODIE</td><td>DEEILO</td></tr>
+<tr><td>Jean-Paul</td><td>JEANPAUL</td><td>AAEJLNPU</td></tr>
+<tr><td>Łukasz</td><td>LUKASZ</td><td>AKLSUZ</td></tr>
+</table>
+
+<h2>04 Search</h2>
+<p>The names are stored in a <b>trie</b> of their signatures: a tree where each node adds one letter, and where
+the names with the same signature are on the same node. Signatures share their first letters, so the trie has
+about one node per name.</p>
+<p>The search goes down the trie of first names and enters a node only if the query has a free copy of its letter.
+Thus it visits only the first names made of letters of the query. For each first name that it finds, the
+remaining letters, in alphabetical order, give one path down the trie of last names. The node at the end of this
+path holds all the last names that complete the query. A search takes a few milliseconds.</p>
+
+<h2>05 Ranking</h2>
+<p>For a first name $f$ and a last name $l$ in a country $c$, the base is the probability of two independent
+names, from the counts $N_{fc}$ of people with the name $f$ in $c$:</p>
+$$p_0(f,l\mid c)=p(f\mid c)\,p(l\mid c),\qquad p(f\mid c)=\frac{N_{fc}+\alpha\,\pi_f}{N_c+\alpha}$$
+<p>with $N_c$ the people of $c$, $\pi_f$ the share of $f$ in the world and $\alpha=10^5$. The model adds a term for
+the pair:</p>
+$$\log p(f,l\mid c)=\log p_0(f,l\mid c)+\mathbb{1}[(f,l)\in S_c]\,\bigl(u_f^\top \operatorname{diag}(g_c)\,v_l+b_c\bigr)-\log Z_c$$
+<p>Each name has a vector of 16 numbers ($u_f$, $v_l$), learned from 282 million people. The product
+$u_f^\top \operatorname{diag}(g_c)\,v_l$ is large when the two names go together, for example a Portuguese first
+name with a Portuguese last name. The weights $g_c$ and the offset $b_c$ are specific to the country. $S_c$
+contains the pairs of names that both occur in $c$, and $Z_c$ makes the probabilities of all pairs sum to 1.</p>
+<p>In the world, the probability is the mixture of the countries, with $w_c=P_c/P$ the share of $c$ in the
+population $P$ of the 105 countries (World Bank, 2023):</p>
+$$p(f,l)=\sum_c w_c\,p(f,l\mid c)$$
+<p>The weights do not come from name_dataset: it has 0.09% of its people in Japan and 4.9% in France, but Japan has
+1.9% of the population of the 105 countries and France 1.0%.</p>
+<p>On people that the model did not see in training, the model needs 0.467 bits per person less than $p_0$, and it
+is better than $p_0$ in each of the 105 countries. The paper gives the details.</p>
+
+<h2>06 The number &ldquo;1 in N&rdquo;</h2>
+<p>$N=1/p(f,l\mid c)$. It is the expected share of people in the country with this exact full name. A full name
+can be &ldquo;1 in 3 billion&rdquo; in a country of 17 million people: the model expects no person with this full
+name, but the two names exist.</p>
+<p>In the world, $N=1/p(f,l)$ is a share of the 6.6 billion people of the 105 countries. The world expects at
+least as many people with a full name as each of its countries: $P\,p(f,l)\ge P_c\,p(f,l\mid c)$. For example,
+Yuki Tanaka is 1 in 13,182 in Japan (9,446 people expected) and 1 in 696,584 in the world (9,474 people
+expected).</p>
+
+<h2 id="real">07 Real names</h2>
+<p>A result is marked <b>real</b> when people of name_dataset have this exact full name in the selected country,
+with their number. The real full names come first in the list, the full names with the most people first. The headline adds the people of the marked names. name_dataset contains only a part of the
+population, and it does not remove duplicates: one person with several accounts counts several times.</p>
+<p>In the world, the page marks the 154.8 million full names of name_dataset, with their people in all countries
+together. Thus a full name with 11 accounts in 7 countries, one of them in France, is real with 11 people in the
+world and real with 1 person in France. These full names, with their people in each country, are in 4,096 files
+of about 113 KB (465 MB together). The letters of the query give its file (the sum of a number per letter, modulo
+4,096), and this file contains all the full names made of these letters.</p>
+<p>Click a result for links to the pages of its first name, its last name and the full name (in a new tab): their
+people in the world and in each country, or in the selected country.</p>
+
+<h2>08 Where people with your name live</h2>
+<p>In the world, the page splits your query into a first name and a last name of the data and gives the
+probability of each country for this full name:</p>
+$$p(c\mid f,l)=\frac{w_c\,p(f,l\mid c)}{\sum_{c'} w_{c'}\,p(f,l\mid c')}$$
+<p>It is an estimate of the model from the frequency of each name in each country, not the count of the
+accounts with this full name: a full name can get a large share in a country where its last name is frequent,
+without any account with this full name there. It is the country of the accounts, not the origin of the name. Both names must
+be in the world file (see 10).</p>
+
+<h2>09 France from INSEE</h2>
+<p>The INSEE counts give $p(f)$ and $p(l)$ directly. The term for the pair comes from a model trained on the French
+people of name_dataset only, which is better for France than the world model (0.763 against 0.42 bits per person,
+each against its own base):</p>
+$$\log p(f,l)=\log\frac{N_f}{N}+\log\frac{N_l}{N'}+u_f^\top v_l-\log Z$$
+<p>The real names of France from INSEE are the full names of France in name_dataset (see 07) whose two names
+are in the INSEE files.</p>
+
+<h2>10 Country and files</h2>
+<p>At the first visit, the page selects the country of your first browser language that has a country (en-GB:
+United Kingdom; fr: France from INSEE), else the world. You can search a country by its name in English, in your
+language or in its own language, with typing errors.</p>
+<p>All the sources but France from INSEE read the same files: the world keeps all the names of the data
+(1,724,039 first names and 3,456,059 last names), with their people in each country. A country is the world
+restricted to the names seen in it, with the people of the country: its results are the same as those of a file
+of the country, and the world file is downloaded once for all the countries. Each vector is compressed to 8 bytes
+by product quantization, which changes the result by 0.006 bits per person.</p>
+<p>The world is too large for one file (73 MB). The world file contains the trie and the people of each name. The
+display forms, the people per country and the vectors of the names are in 5,060 files of 1,024 names (about 14 KB
+each), in the order of the trie. The trie sorts the letters of each name from the rarest letter (Q, X, Z...) to
+the most frequent one, thus a search skips all the names with a letter that is not in the query, and the names
+that it finds are in few files. After the trie, a search downloads the files of the names that it finds (85 files,
+1.5 MB, for a median query) and the file of its real full names (see 07). Files already downloaded are not
+downloaded again. France from INSEE is one file with all its data.</p>
+<table>
+<tr><th>France, INSEE</th><td class="num">13.0 MB</td></tr>
+<tr><th>World (trie and people of each name)</th><td class="num">9.2 MB</td></tr>
+<tr><th>World, names found by a search (median)</th><td class="num">1.5 MB</td></tr>
+<tr><th>World, real full names (one file per search)</th><td class="num">113 KB</td></tr>
+</table>
+
+<h2>11 Privacy</h2>
+<p>The search and the ranking run in your browser: the name you type is not sent to a server. Except for France
+from INSEE, the page downloads the files of the names made of your letters (see 10) and the file of real full
+names of your letters (see 07): the server can see which files they are, thus which letters your name can
+contain. The files contain, for each first name and each last name, the number of people per country and the
+vector, and the full names of the people of name_dataset with their number per country, and no other data about
+them (no gender, no account, no contact data).</p>
+
+<h2>12 Limits</h2>
+<p>name_dataset comes from profiles of a social network: it contains typing errors, nicknames, words that are not
+names, and names from other countries. Only Latin script is kept. INSEE gives only the names of people born in
+France, for the periods above. The probabilities are estimates of a model.</p>
+
+<h2>References</h2>
+<p>[1] P. Remy. name-dataset. <a href="https://github.com/philipperemy/name-dataset">github.com/philipperemy/name-dataset</a>, 2021.<br>
+[2] INSEE. Fichier des prénoms, 1900&ndash;2022.<br>
+[3] INSEE. Noms de famille des personnes nées en France, 1891&ndash;2000.<br>
+[4] <a href="world_model.pdf">A calibrated world model of first-name and last-name pairs, and its quantization</a> (paper, PDF).</p>
+</main>
+<footer><a href="./">&larr; Search</a></footer>
+</body>
+</html>
