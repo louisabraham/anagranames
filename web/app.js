@@ -1,16 +1,30 @@
-// Search page: loads the pack of the selected source once, then lists the anagram names while the visitor types.
-// The query and the source are kept in the address (?q=...&from=...), so a search can be shared.
+// The page: 5 tabs on the same data. Home tells the story of a name in steps (its first name, last name, full name
+// and anagrams); at the end, the visitor can use the other tabs freely. Anagrams lists the full names with the
+// letters of the query; First name, Last name and Full name give the people with a name, per country. Copy link
+// gives the address of the view.
 // index.html loads this file with the build version (?v=..., web/build.mjs), and each file below has it too: a
 // browser that keeps files in its cache never mixes the files of two builds.
 const version = new URL(import.meta.url).search;
-const { Model, oneIn } = await import(`./anagram.js${version}`);
+const { Model } = await import(`./anagram.js${version}`);
 
 const STEP = 50; // names shown, and added by the More button
+const PAUSE = 200; // ms without typing before a view reads files
+const TABS = ["home", "anagrams", "first", "last", "full"];
+const FREE = "anagraname.free"; // localStorage: the visitor has seen the story once, the tabs show
 const $ = (id) => document.getElementById(id);
-const [input, from, choices, status, headline, origin, list, more] =
-  ["q", "from", "from-list", "status", "headline", "origin", "results", "more"].map($);
+const [input, from, choices, status, headline, list, more] =
+  ["q", "from", "from-list", "status", "headline", "results", "more"].map($);
 const n = (x) => x.toLocaleString("en-US");
 const people = (x) => `${n(x)} ${x === 1 ? "person" : "people"}`;
+const round2 = (x) => Number(x.toPrecision(2)); // 2 significant digits: the model gives an order of magnitude
+/** A probability as "1 in N", N rounded (1 in 700,000; 1 in 650 million). */
+function odds(logP) {
+  const x = Math.exp(-logP);
+  for (const [unit, word] of [[1e12, "trillion"], [1e9, "billion"], [1e6, "million"]]) {
+    if (x >= unit) return `1 in ${round2(x / unit)} ${word}`;
+  }
+  return `1 in ${n(round2(x))}`;
+}
 
 // ---------- sources: World, France from INSEE, then the countries; chosen with a fuzzy search ----------
 const english = new Intl.DisplayNames(["en"], { type: "region" });
@@ -35,14 +49,15 @@ const own = (country) => {
 const sources = (await (await fetch(`data/packs.json${version}`)).json()).map((p) => {
   const label = p.world ? "World" : p.source === "INSEE" ? `${english.of(p.country)}, INSEE` : english.of(p.country);
   const terms = [label, ...(p.country ? [local.of(p.country), own(p.country), p.country] : []), ALIASES[p.id] ?? ""];
-  const size = `${(p.bytes / 1e6).toFixed(1)} MB`;
-  const text = p.world || p.source === "INSEE" ? `${label} (${size})` : label; // the countries share the world file
-  return { ...p, label, text, size, terms: terms.filter(Boolean).map(fold) };
+  const size = `${(p.bytes / 1e6).toFixed(1)} MB`; // shown while the file loads
+  return { ...p, label, text: label, size, terms: terms.filter(Boolean).map(fold) };
 });
 const rank = (s) => (s.world ? 0 : s.source === "INSEE" ? 1 : 2);
 sources.sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
 const byId = new Map(sources.map((s) => [s.id, s]));
 const packOf = (country) => (country === "FR" ? "FR-insee" : country); // the default source of a country
+/** The country of a source for Model.search (null: the world, or the one country of the pack). */
+const countryOf = (source) => (source.world || source.source === "INSEE" ? null : source.country);
 
 /** Optimal string alignment distance: insertions, deletions, substitutions and swaps of two letters. */
 function distance(a, b) {
@@ -77,7 +92,6 @@ function score(query, text) {
   return s + (text === query ? 10 : 0);
 }
 
-let current = null; // id of the selected source
 let matches = [];
 let active = 0;
 
@@ -90,7 +104,7 @@ function openChoices(query) {
         .sort((a, b) => b.v - a.v)
         .map((m) => m.s)
     : sources;
-  active = Math.max(0, q ? 0 : matches.findIndex((s) => s.id === current));
+  active = Math.max(0, q ? 0 : matches.findIndex((s) => s.id === view.from));
   choices.replaceChildren(...matches.map((s, i) => {
     const li = document.createElement("li");
     li.id = `from-${i}`;
@@ -120,15 +134,14 @@ function closeChoices() {
   choices.hidden = true;
   from.setAttribute("aria-expanded", "false");
   from.removeAttribute("aria-activedescendant");
-  from.value = byId.get(current).text;
+  from.value = byId.get(view.from).text;
 }
 
 function choose(id) {
-  current = id;
+  limits = [STEP, STEP];
+  go({ from: id });
   closeChoices();
-  limit = STEP;
-  update();
-  input.focus();
+  (view.tab === "anagrams" ? input : view.tab === "last" ? $("last") : $("first")).focus();
 }
 
 from.addEventListener("focus", () => {
@@ -157,20 +170,153 @@ from.addEventListener("keydown", (e) => {
 function detect() {
   for (const lang of navigator.languages) {
     try {
-      const pack = packOf(new Intl.Locale(lang).maximize().region);
-      if (byId.has(pack)) return pack;
+      const id = packOf(new Intl.Locale(lang).maximize().region);
+      if (byId.has(id)) return id;
     } catch {
       // not a language tag
     }
   }
   return "world";
 }
-const params = new URLSearchParams(location.search);
-current = byId.has(params.get("from")) ? params.get("from") : detect();
-from.value = byId.get(current).text;
-input.value = params.get("q") ?? "";
 
-// ---------- search ----------
+// ---------- the view ----------
+// The address stays the address of the page: the view is in the history entries (their state), so the back and
+// forward buttons go between the views. A shared address is read once, then removed from the address bar. Its
+// form: ?Yuki+Tanaka (the story of the name), ?anagrams=Yuki+Tanaka, ?first=Yuki, ?last=Tanaka,
+// ?first=Yuki&last=Tanaka, with &in=JP for a source other than the world.
+const KNOWN = ["anagrams", "first", "last", "in"];
+function readView() {
+  const p = new URLSearchParams(location.search);
+  const first = p.get("first") ?? "", last = p.get("last") ?? "", anagrams = p.get("anagrams");
+  const story = [...p].find(([k, v]) => !KNOWN.includes(k) && v === "")?.[0] ?? "";
+  const tab = first && last ? "full" : first ? "first" : last ? "last" : anagrams !== null ? "anagrams" : "home";
+  return {
+    tab,
+    q: anagrams ?? story,
+    step: story ? 1 : 0, // the step of the story (0: the question)
+    free: tab !== "home" || localStorage.getItem(FREE) === "1",
+    from: byId.has(p.get("in")) ? p.get("in") : location.search ? "world" : detect(), // a shared address: the world
+    first,
+    last,
+  };
+}
+let view = history.state?.view ?? readView(); // after a reload, the view of the history entry
+history.replaceState({ view }, "", location.pathname);
+
+/** The address of a view, to share it. */
+function shareUrl(v) {
+  const words = (t) => encodeURIComponent(t.trim()).replace(/%20/g, "+");
+  const parts = v.tab === "home" ? (v.q.trim() ? [words(v.q)] : [])
+    : v.tab === "anagrams" ? (v.q.trim() ? [`anagrams=${words(v.q)}`] : [])
+    : [v.tab !== "last" && v.first.trim() && `first=${words(v.first)}`, v.tab !== "first" && v.last.trim() && `last=${words(v.last)}`].filter(Boolean);
+  if (v.from !== "world" && v.tab !== "home") parts.push(`in=${v.from}`);
+  return `${location.origin}${location.pathname}${parts.length ? `?${parts.join("&")}` : ""}`;
+}
+
+/** Change the view; push: a new history entry (to open a tab or a name), else the same entry (to type). */
+function go(change, push = false) {
+  if (view.tab === "home" && change.tab && change.tab !== "home" && !("from" in change)) change = { ...change, from: "world" }; // the story is in the world
+  view = { ...view, ...change };
+  if (view.tab !== "home" && !view.free) { // a tab other than the story: the tabs are open now
+    view.free = true;
+    localStorage.setItem(FREE, "1");
+  }
+  history[push ? "pushState" : "replaceState"]({ view }, "", location.pathname);
+  show();
+  update();
+}
+window.addEventListener("popstate", (e) => {
+  if (!e.state?.view) return;
+  view = e.state.view;
+  from.value = byId.get(view.from).text;
+  show();
+  update();
+});
+
+const plainClick = (e) => !(e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey);
+
+/** A link to a view: a normal link (open in a new tab works), and a click changes the view in this page. */
+function viewLink(text, change, title = "") {
+  const a = document.createElement("a");
+  a.href = shareUrl({ ...view, ...change });
+  a.textContent = text;
+  if (title) a.title = title;
+  a.addEventListener("click", (e) => {
+    if (!plainClick(e)) return;
+    e.preventDefault();
+    go(change, true);
+    window.scrollTo(0, 0);
+  });
+  return a;
+}
+
+const TAGLINE = {
+  home: "people whose name has your letters.",
+  anagrams: "people whose name has your letters.",
+  first: "who has this first name, and where.",
+  last: "who has this last name, and where.",
+  full: "who has this full name, and where.",
+};
+
+/** Show the tab of the view: tab links, fields, title, the address to copy. */
+function show() {
+  const home = view.tab === "home", names = !home && view.tab !== "anagrams";
+  document.body.classList.toggle("onboarding", !view.free);
+  document.body.classList.toggle("story-step", home && view.step > 0);
+  for (const t of TABS) {
+    const a = $(`tab-${t}`);
+    a.href = shareUrl({ ...view, tab: t });
+    if (t === view.tab) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  }
+  $("fields-anagrams").hidden = names || (home && view.step > 0);
+  $("start").hidden = !home;
+  $("q-label").className = home ? "prompt" : "visually-hidden";
+  $("source-bar").hidden = home;
+  $("out-home").hidden = !home || view.step === 0;
+  $("out-anagrams").hidden = view.tab !== "anagrams";
+  $("fields-names").hidden = $("out-names").hidden = !names;
+  $("first-field").hidden = view.tab === "last";
+  $("last-field").hidden = view.tab === "first";
+  if (input.value !== view.q) input.value = view.q;
+  if ($("first").value !== view.first) $("first").value = view.first;
+  if ($("last").value !== view.last) $("last").value = view.last;
+  $("tagline").textContent = TAGLINE[view.tab];
+  const typed = view.tab === "anagrams" ? view.q.trim() : [view.tab !== "last" && view.first.trim(), view.tab !== "first" && view.last.trim()].some(Boolean);
+  $("hero").hidden = home ? view.step > 0 : Boolean(typed); // the title only before a search
+  if (!names) $("title").textContent = "Anagra\u00adname";
+  if (document.activeElement !== from) from.value = byId.get(view.from).text;
+  share.dataset.url = shareUrl(view);
+  share.hidden = !typed;
+  share.textContent = "Copy link";
+}
+
+for (const t of TABS) {
+  $(`tab-${t}`).addEventListener("click", (e) => {
+    if (!plainClick(e)) return;
+    e.preventDefault();
+    if (t !== view.tab) go({ tab: t }, true);
+  });
+}
+
+// Copy the address of the view; without the clipboard API (old browsers, no permission), a hidden text field.
+const share = $("share");
+share.addEventListener("click", async () => {
+  const url = share.dataset.url;
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    const field = Object.assign(document.createElement("textarea"), { value: url });
+    document.body.append(field);
+    field.select();
+    document.execCommand("copy");
+    field.remove();
+  }
+  share.textContent = "Copied ✓";
+  setTimeout(() => (share.textContent = "Copy link"), 2000);
+});
+
+// ---------- files ----------
 const models = new Map(); // pack -> Promise<Model>
 const ready = new Set();
 function load(pack) {
@@ -184,33 +330,32 @@ function load(pack) {
   return models.get(pack);
 }
 
-// The world pack has the data of its names in chunk files: a search reads the chunks of the names that it finds.
-const PAUSE = 200; // ms without typing before a search reads files
-const chunks = new Map(); // pack/side/chunk -> Promise
-function loadChunk(model, pack, side, c) {
-  const id = `${pack}/${side}/${c}`;
-  if (!chunks.has(id)) {
-    const done = fetch(`data/${pack}.names/${model.chunkFile(side, c)}${version}`)
+/** Read a file of data/ once and give its bytes to use: cache key -> Promise. */
+const files = new Map();
+function once(key, path, use) {
+  if (!files.has(key)) {
+    const done = fetch(`data/${path}${version}`)
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status} for ${r.url}`))))
-      .then((b) => model.addChunk(side, c, new Uint8Array(b)));
-    done.catch(() => chunks.delete(id));
-    chunks.set(id, done);
+      .then((b) => use(new Uint8Array(b)));
+    done.catch(() => files.delete(key));
+    files.set(key, done);
   }
-  return chunks.get(id);
+  return files.get(key);
 }
+// The world pack has the data of its names in chunk files, and its real full names in 4096 parts.
+const loadChunk = (model, pack, side, c) =>
+  once(`${pack}/${side}/${c}`, `${pack}.names/${model.chunkFile(side, c)}`, (b) => model.addChunk(side, c, b));
+const loadPart = (model, pack, part) =>
+  once(`${pack}/${part}`, `${pack}.real/${model.partFile(part)}`, (b) => model.addPart(part, b));
 
-// World packs: the real full names are in 4096 parts; a search reads the part of the letters of its query.
-const parts = new Map(); // pack/part -> Promise
-function loadPart(model, pack, part) {
-  const id = `${pack}/${part}`;
-  if (!parts.has(id)) {
-    const done = fetch(`data/${pack}.real/${model.partFile(part)}${version}`)
-      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status} for ${r.url}`))))
-      .then((b) => model.addPart(part, new Uint8Array(b)));
-    done.catch(() => parts.delete(id));
-    parts.set(id, done);
-  }
-  return parts.get(id);
+/** Read the chunks and the part that a view needs, after a pause in typing; false if a newer update started. */
+async function fetchAll(id, model, pack, need, part) {
+  if (!need.length && (part === null || model.hasPart(part))) return true;
+  await new Promise((resolve) => setTimeout(resolve, PAUSE));
+  if (id !== run) return false; // the visitor typed again
+  status.textContent = need.length ? `Loading ${need.length} files of names...` : "Loading the real names...";
+  await Promise.all([...need.map(([side, c]) => loadChunk(model, pack, side, c)), part !== null && loadPart(model, pack, part)]);
+  return id === run;
 }
 
 function span(className, text) {
@@ -220,131 +365,406 @@ function span(className, text) {
   return s;
 }
 
-/** Links to the pages of the first name, the last name and the full name of a result (name.html, new tab). */
-function explore(r) {
-  const p = document.createElement("p");
-  p.className = "explore";
-  const a = (text, q) => {
-    const link = document.createElement("a");
-    link.href = `name.html?${new URLSearchParams({ from: current, ...q })}`;
-    link.target = "_blank";
-    link.textContent = `${text} ↗`;
-    link.addEventListener("click", (e) => e.stopPropagation()); // the click opens the page, it does not close the row
-    return link;
-  };
-  p.append("Explore: ", a(`first name ${r.first}`, { first: r.first }), " · ", a(`last name ${r.last}`, { last: r.last }),
-    " · ", a(`full name ${r.first} ${r.last}`, { first: r.first, last: r.last }));
-  return p;
+// ---------- anagrams ----------
+/** The hero number of a view: a big value and a sentence. */
+function stat(el, value, text) {
+  el.replaceChildren(span("big", value), " ", span("say", text));
+  el.hidden = false;
 }
 
-function row(r, i, isQuery, world) {
+/** A result: its first name, its last name and its number link to the tabs of the names. Under the name: the
+ * people and their countries (a real name), or the probability and the most probable country (another name). */
+function row(r, isQuery, world) {
   const li = document.createElement("li");
-  li.tabIndex = 0;
-  li.setAttribute("aria-expanded", "false");
-  const toggle = () => {
-    const open = li.getAttribute("aria-expanded") === "true";
-    li.setAttribute("aria-expanded", String(!open));
-    if (open) li.querySelector(".explore").remove();
-    else li.append(explore(r));
-  };
-  li.addEventListener("click", toggle);
-  li.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" && e.key !== " ") return;
-    e.preventDefault();
-    toggle();
-  });
-  const name = span("name", `${r.first} ${r.last}`);
-  if (isQuery) name.append(span("tag you", "your name"));
-  if (r.real) name.append(span("tag real", `real · ${people(r.real)}`));
-  const right = span("odds", oneIn(r.logP));
-  if (world) right.prepend(span("where", english.of(r.country)));
-  li.append(span("rank", String(i + 1).padStart(3, "0")), name, right);
+  const name = span("name", "");
+  name.append(viewLink(r.first, { tab: "first", first: r.first }, `The first name ${r.first}: people per country`), " ",
+    viewLink(r.last, { tab: "last", last: r.last }, `The last name ${r.last}: people per country`));
+  if (isQuery) name.append(" ", span("tag you", "you"));
+  const detail = span("detail", "");
+  detail.append(viewLink(r.real ? people(r.real) : odds(r.logP), { tab: "full", first: r.first, last: r.last },
+    `${r.first} ${r.last}: people per country`));
+  const where = r.real ? r.realCountries.map(([c]) => english.of(c)).join(", ") : world ? english.of(r.country) : "";
+  if (where) detail.append(span("where", where));
+  li.className = r.real ? "real" : "possible";
+  li.append(name, detail);
   return li;
 }
 
-function link(text, pack) {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = "link";
-  b.textContent = text;
-  b.addEventListener("click", () => choose(pack));
-  return b;
+// The last searches, ranked: the back button and the next names of a list need no new computation.
+const searches = new Map(); // source|letters -> ranking (the anagrams depend only on the letters)
+const letters = (model, query) => [...model.key(query)].sort().join("");
+async function search(id, model, source, query) {
+  if (!(await fetchAll(id, model, source.pack, model.need(query), model.partOf(query)))) return null;
+  const ranking = model.ranking(query, countryOf(source));
+  searches.set(`${source.id}|${letters(model, query)}`, ranking);
+  if (searches.size > 20) searches.delete(searches.keys().next().value);
+  return ranking;
 }
 
-function showOrigin(res, world, words, model) {
-  origin.hidden = false;
-  if (!world) {
-    origin.replaceChildren("Where do people with your name live? ", link("See the world →", "world"));
-  } else if (res.origin) {
-    const top = res.origin.filter((o, i) => i === 0 || o.p >= 0.01).slice(0, 3);
-    const where = top.map((o) => `${english.of(o.country)} ${Math.round(o.p * 100)}%`).join(" · ");
-    const pack = packOf(top[0].country);
-    origin.replaceChildren(`Where people with your name live (model estimate): ${where}. `);
-    if (byId.has(pack)) origin.append(link(`Search in ${byId.get(pack).label} →`, pack));
-  } else {
-    origin.textContent = words < 2
-      ? "Type a first name and a last name to see where people with your name live."
-      : `Your name is not in the data: it keeps the first names of at least ${model.minFirst} people and the last names of at least ${model.minLast} people in the world.`;
+async function renderAnagrams(id, model, source) {
+  const query = view.q;
+  const key = model.key(query);
+  const panels = $("anagram-panels"), possible = $("possible");
+  delete headline.dataset.key;
+  if (key.length < 4) {
+    list.replaceChildren();
+    possible.replaceChildren();
+    panels.hidden = more.hidden = true;
+    status.textContent = key ? "Type at least 4 letters" : "";
+    return;
   }
+  const ranking = searches.get(`${source.id}|${letters(model, query)}`) ?? (await search(id, model, source, query));
+  if (!ranking) return; // a newer update started
+  const res = { ...ranking.summary, results: ranking.real(limits[0]), possible: ranking.possible(limits[1]) };
+  const world = source.world;
+  status.textContent = "";
+  const where = world ? "in the world" : `in ${english.of(source.country)}`;
+  const others = res.found - res.realNames;
+  if (res.realPeople) stat(headline, people(res.realPeople), `${where} ${res.realPeople === 1 ? "has" : "have"} a name made of your letters, with ${n(res.realNames)} full name${res.realNames === 1 ? "" : "s"}.`);
+  else stat(headline, "Nobody", `${where} in the data has a name made of your letters.`);
+  if (others) stat($("headline-model"), `${n(others)} name${others === 1 ? "" : "s"}`, `${others === 1 ? "is" : "are"} made of your letters, but nobody in the data has ${others === 1 ? "it" : "them"}. The most probable first.`);
+  else stat($("headline-model"), "No other name", res.found ? "is made of your letters." : `${where} is made of your letters.`);
+  headline.dataset.key = `${res.found}|${res.realNames}`; // for the tests
+  const isQuery = (r) => model.key(r.first) + model.key(r.last) === key;
+  list.replaceChildren(...res.results.map((r) => row(r, isQuery(r), world)));
+  possible.replaceChildren(...res.possible.map((r) => row(r, isQuery(r), world)));
+  panels.style.setProperty("--rows", Math.max(res.results.length, res.possible.length, 1)); // rows of the two lists
+  more.hidden = res.realNames <= limits[0] && others <= limits[1];
+  panels.hidden = false;
+  if (!more.hidden && near(more)) requestAnimationFrame(() => more.click()); // the screen is not full yet
 }
 
+// The next names load when the end of the lists comes near the screen; the More button stays for the keyboard.
+const near = (el) => el.getBoundingClientRect().top < innerHeight + 800;
+new IntersectionObserver((entries) => {
+  if (entries.some((e) => e.isIntersecting) && !more.hidden) more.click();
+}, { rootMargin: "800px" }).observe(more);
+
+// ---------- first name, last name, full name ----------
+function cell(content, className = "") {
+  const td = document.createElement("td");
+  td.className = className;
+  td.append(content);
+  return td;
+}
+
+const TOP = 10; // countries shown before "Show all"
+let allCountries = false;
+
+/** Bars of the countries, most first, with the value at the end of each bar (the details in the hover text). */
+function bars(tableEl, rows, value, hover) {
+  const max = rows[0][1];
+  tableEl.tBodies[0].replaceChildren(...rows.map(([c, x]) => {
+    const bar = span("meter", "");
+    bar.style.width = `calc((100% - 8ch) * ${x / max})`;
+    const tr = document.createElement("tr");
+    tr.title = hover(c, x);
+    const td = cell(bar, "share");
+    td.append(span("tip", value(x)));
+    tr.append(cell(english.of(c)), td);
+    return tr;
+  }));
+  tableEl.hidden = false;
+}
+
+/** The countries of the data: the first TOP, then all with the button. */
+function table(countries, total) {
+  bars($("countries"), allCountries ? countries : countries.slice(0, TOP), n, (c, x) => `${english.of(c)}: ${people(x)}, ${((100 * x) / total).toFixed(1)}%`);
+  $("all").hidden = allCountries || countries.length <= TOP;
+  $("all").textContent = `Show all ${countries.length} countries`;
+}
+$("all").addEventListener("click", () => {
+  allCountries = true;
+  update();
+});
+
+/** Expected people: about 170, 2.6, fewer than 1. */
+function expected(x) {
+  if (x < 1) return "< 1";
+  return x < 10 ? String(round2(x)) : n(round2(x));
+}
+
+const HINT = { first: "Type a first name.", last: "Type a last name.", full: "Type a first name and a last name." };
+let shown = ""; // the names of the last name view, to wait for a pause in typing when they change
+
+async function renderName(id, model, source) {
+  const summary = $("summary"), links = $("links"), modelPanel = $("model-panel"), countriesTable = $("countries");
+  const want = { first: view.tab !== "last" ? view.first.trim() : "", last: view.tab !== "first" ? view.last.trim() : "" };
+  const clear = (text) => {
+    summary.replaceChildren(span("say", text));
+    links.replaceChildren();
+    countriesTable.hidden = $("all").hidden = modelPanel.hidden = true;
+    status.textContent = "";
+  };
+  $("title").textContent = { first: "First name", last: "Last name", full: "Full name" }[view.tab];
+  if ((view.tab !== "last" && !want.first) || (view.tab !== "first" && !want.last)) return clear(HINT[view.tab]);
+  const key = `${source.id}|${view.tab}|${want.first}|${want.last}`;
+  if (key !== shown) {
+    await new Promise((resolve) => setTimeout(resolve, PAUSE));
+    if (id !== run) return; // the visitor typed again
+    shown = key;
+    allCountries = false;
+  }
+  const need = [...(want.first ? model.needName("first", want.first) : []), ...(want.last ? model.needName("last", want.last) : [])];
+  if (!(await fetchAll(id, model, source.pack, need, null))) return;
+  const country = countryOf(source);
+  const c = country === null ? -1 : model.countries.indexOf(country);
+  const world = source.world;
+  const where = world ? "in the world" : `in ${english.of(source.country)}`;
+  const idOf = (side, text) => { // -1 when the name is not in the data (or not seen in the country)
+    const i = text ? model.nameId(side, text) : -1;
+    return i >= 0 && (c < 0 || model.nameCountries(side, i, c).length > 0) ? i : -1;
+  };
+  const f = idOf("first", want.first), l = idOf("last", want.last);
+  const missing = [want.first && f < 0 && `The first name ${want.first}`, want.last && l < 0 && `The last name ${want.last}`].filter(Boolean);
+  if (missing.length) return clear(`${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not in the data ${where}.`);
+  const names = { ...(f >= 0 && { first: model.first.name(f) }), ...(l >= 0 && { last: model.last.name(l) }) };
+  const inCountries = (k) => (world ? `, in ${k} countr${k === 1 ? "y" : "ies"}` : "");
+  let countries;
+  if (f >= 0 && l >= 0) {
+    const part = model.parts ? model.pairPart(f, l) : null;
+    if (!(await fetchAll(id, model, source.pack, [], part))) return;
+    countries = model.realCountries(f, l, c);
+    const total = countries.reduce((s, [, x]) => s + x, 0);
+    const full = `${names.first} ${names.last}`;
+    stat(summary, total ? people(total) : "Nobody", total
+      ? `${total === 1 ? "has" : "have"} the full name ${full} ${where}${inCountries(countries.length)}.`
+      : `has the full name ${full} ${where}.`);
+    // the model: p(f, l) per person; expected people = population x p
+    const fe = model.first.entry(f), le = model.last.entry(l);
+    const k = Math.max(c, 0);
+    const lp = world ? model.logPMixture(fe, le)[0] : model.logP(fe, le, k);
+    const pop = world ? model.population.reduce((s, x) => s + x, 0) : model.population[k];
+    const mean = pop * Math.exp(lp);
+    stat($("estimate"), `≈ ${expected(mean)} ${mean >= 1 && round2(mean) === 1 ? "person" : "people"}`,
+      `expected ${world ? `in the ${model.countries.length} countries` : where}: ${odds(lp)} people.`);
+    if (world) {
+      const top = model.shares(f, l, 5).filter((o, j) => j === 0 || o.p >= 0.01);
+      bars($("model-countries"), top.map((o) => [o.country, o.p * mean]), expected, (cc, x) => `${english.of(cc)}: about ${expected(x)} people expected`);
+    } else $("model-countries").hidden = true;
+    modelPanel.hidden = false;
+    links.replaceChildren("Explore: ", viewLink(`first name ${names.first}`, { tab: "first", first: names.first }), " · ",
+      viewLink(`last name ${names.last}`, { tab: "last", last: names.last }), " · ",
+      viewLink("anagrams", { tab: "anagrams", q: full }));
+  } else {
+    const [side, i] = f >= 0 ? ["first", f] : ["last", l];
+    countries = model.nameCountries(side, i, c);
+    const label = `the ${side} name ${names[side]}`;
+    const inWorld = model[side].total[i];
+    if (world) stat(summary, people(inWorld), `${inWorld === 1 ? "has" : "have"} ${label}${inCountries(countries.length)}.`);
+    else stat(summary, people(countries[0][1]), `${where} ${countries[0][1] === 1 ? "has" : "have"} ${label} · ${people(inWorld)} in the world.`);
+    modelPanel.hidden = true;
+    links.replaceChildren();
+  }
+  const total = countries.reduce((s, [, x]) => s + x, 0);
+  if (world && total) table(countries, total);
+  else countriesTable.hidden = $("all").hidden = true;
+  status.textContent = "";
+}
+
+// ---------- home: the story of a name, step by step ----------
+const KICKER = { first: "Your first name", last: "Your last name", full: "Your full name", real: "Your anagrams",
+  possible: "Names that could exist", end: "Now, explore" };
+const stories = new Map(); // query -> the numbers of its story
+
+/** The split of a full name into a first name and a last name of the data: the most probable full name of the
+ * splits of its words; null if no split gives two names of the data. */
+function splitName(model, query) {
+  const words = query.trim().split(/\s+/);
+  let best = null, bestLp = -Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const f = model.nameId("first", words.slice(0, i).join(" ")), l = model.nameId("last", words.slice(i).join(" "));
+    if (f < 0 || l < 0) continue;
+    const lp = model.logPMixture(model.first.entry(f), model.last.entry(l))[0];
+    if (lp > bestLp) [best, bestLp] = [{ f, l, lp }, lp];
+  }
+  return best;
+}
+
+/** The numbers of the story of a query: its anagrams, and its first, last and full name (null if no split). */
+async function storyOf(id, model, source, query) {
+  const key = query.trim().replace(/\s+/g, " ").toLowerCase();
+  if (stories.has(key)) return stories.get(key);
+  const words = query.trim().split(/\s+/), need = [];
+  for (let i = 1; i < words.length; i++) {
+    need.push(...model.needName("first", words.slice(0, i).join(" ")), ...model.needName("last", words.slice(i).join(" ")));
+  }
+  if (!(await fetchAll(id, model, source.pack, need, null))) return null;
+  const ranking = searches.get(`${source.id}|${letters(model, query)}`) ?? (await search(id, model, source, query));
+  if (!ranking) return null;
+  const data = { ranking, names: null };
+  const best = splitName(model, query);
+  if (best) {
+    const { f, l, lp } = best;
+    if (!(await fetchAll(id, model, source.pack, [], model.pairPart(f, l)))) return null;
+    const pop = model.population.reduce((a, b) => a + b, 0);
+    data.names = {
+      first: model.first.name(f), last: model.last.name(l), firstPeople: model.first.total[f],
+      firstCountries: model.nameCountries("first", f), lastPeople: model.last.total[l],
+      lastCountries: model.nameCountries("last", l), realCountries: model.realCountries(f, l),
+      expected: pop * Math.exp(lp), lp,
+    };
+  }
+  stories.set(key, data);
+  return data;
+}
+
+const stepsOf = (data) => [...(data.names ? ["first", "last", "full"] : []), "real", "possible", "end"];
+
+function el(tag, className, ...children) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  e.append(...children);
+  return e;
+}
+const big = (text) => el("b", "", text);
+const nameOf = (text) => el("i", "", text);
+
+/** Bars of the first countries, people at the tip. */
+function miniBars(countries, top = 5) {
+  const rows = countries.slice(0, top), max = rows[0]?.[1] ?? 1;
+  return el("table", "countries mini", el("tbody", "", ...rows.map(([c, x]) => {
+    const bar = span("meter", "");
+    bar.style.width = `calc((100% - 8ch) * ${x / max})`;
+    const td = cell(bar, "share");
+    td.append(span("tip", n(x)));
+    return el("tr", "", cell(english.of(c)), td);
+  })));
+}
+
+/** A short list of full names, with their people (real names) or their probability (the others). */
+function miniList(results, query, model) {
+  return el("ol", "results mini", ...results.slice(0, 5).map((r) => row(r, model.key(r.first) + model.key(r.last) === model.key(query), true)));
+}
+
+function free() {
+  localStorage.setItem(FREE, "1");
+  view.free = true;
+  history.replaceState({ view }, "", location.pathname);
+  document.body.classList.remove("onboarding");
+}
+
+/** One step of the story. */
+function slide(kind, data, k, count, model) {
+  const { ranking, names } = data, sum = ranking.summary, query = view.q;
+  const progress = el("ol", "progress", ...Array.from({ length: count }, (_, i) => el("li", i < k ? "done" : i === k ? "now" : "")));
+  const claim = el("h2", "claim");
+  const body = [];
+  const where = (countries) => `in ${countries.length} countr${countries.length === 1 ? "y" : "ies"}`;
+  if (kind === "first" || kind === "last") {
+    const total = kind === "first" ? names.firstPeople : names.lastPeople;
+    const countries = kind === "first" ? names.firstCountries : names.lastCountries;
+    const top = countries[0];
+    claim.append(big(n(total)), ` ${total === 1 ? "person has" : "people have"} the ${kind} name `, nameOf(names[kind]), ".");
+    body.push(el("p", "say", `Most of them live in ${english.of(top[0])} (${Math.round((100 * top[1]) / total)}%). They live ${where(countries)}:`),
+      miniBars(countries), el("p", "note", "Counted in the data: the accounts of name_dataset."));
+  } else if (kind === "full") {
+    const real = names.realCountries.reduce((a, [, x]) => a + x, 0), full = `${names.first} ${names.last}`;
+    if (real) claim.append(big(n(real)), ` ${real === 1 ? "person is" : "people are"} called `, nameOf(full), ".");
+    else claim.append(big("Nobody"), " in the data is called ", nameOf(full), ".");
+    const counted = el("div", "panel", el("h3", "panel-title", "In the data ", span("", "counted")),
+      el("p", "say", real ? `${people(real)}, ${where(names.realCountries)}.` : "No account has this full name."));
+    if (real) counted.append(miniBars(names.realCountries, 3));
+    const computed = el("div", "panel", el("h3", "panel-title", "Model estimate ", span("", "computed")),
+      el("p", "say", `≈ ${expected(names.expected)} people expected in the 105 countries: ${odds(names.lp)} people.`));
+    body.push(el("div", "panels", counted, computed));
+  } else if (kind === "real") {
+    if (sum.realPeople) {
+      claim.append(big(people(sum.realPeople)), ` ${sum.realPeople === 1 ? "has" : "have"} a name made of your letters.`);
+      body.push(el("p", "say", `${n(sum.realNames)} full name${sum.realNames === 1 ? "" : "s"} of the data use exactly the letters of ${query.trim()}. The most frequent:`),
+        miniList(ranking.real(5), query, model));
+    } else claim.append(big("Nobody"), " in the data has a name made of your letters.");
+  } else if (kind === "possible") {
+    const others = sum.found - sum.realNames;
+    claim.append(big(n(others)), ` other name${others === 1 ? "" : "s"} could be made of your letters.`);
+    if (others) body.push(el("p", "say", "Nobody in the data has them: the model gives their probability. The most probable:"),
+      miniList(ranking.possible(5), query, model));
+  } else {
+    free();
+    claim.append("Now, explore on your own.");
+    const world = { from: "world" }; // the story is in the world: its links too
+    const links = [viewLink("All your anagrams →", { ...world, tab: "anagrams" })];
+    if (names) links.push(viewLink(`The first name ${names.first} →`, { ...world, tab: "first", first: names.first }),
+      viewLink(`The last name ${names.last} →`, { ...world, tab: "last", last: names.last }),
+      viewLink(`The full name ${names.first} ${names.last} →`, { ...world, tab: "full", first: names.first, last: names.last }));
+    body.push(el("p", "say", "The tabs at the top are open now."), el("div", "explore-links", ...links));
+  }
+  const nav = el("div", "story-nav");
+  const back = el("button", "quiet", "← Back");
+  back.type = "button";
+  back.addEventListener("click", () => go({ step: view.step - 1 }));
+  nav.append(back);
+  if (kind !== "end") {
+    const next = el("button", "", "Next →");
+    next.type = "button";
+    next.id = "next";
+    next.addEventListener("click", () => go({ step: view.step + 1 }, true));
+    nav.append(next, viewLink("Skip the story", { tab: "anagrams", from: "world" }));
+  }
+  return el("article", `slide slide-${kind}`, progress, el("p", "kicker", `${k + 1} / ${count} · ${KICKER[kind]}`), claim, ...body, nav);
+}
+
+async function renderHome(id, model, source) {
+  const story = $("story");
+  status.textContent = "";
+  if (view.step === 0) return; // the question
+  if (model.key(view.q).length < 4) return go({ step: 0 });
+  if (!story.firstChild) story.replaceChildren(el("p", "say", "Looking for your name..."));
+  const data = await storyOf(id, model, source, view.q);
+  if (!data || id !== run) return;
+  const steps = stepsOf(data);
+  const k = Math.min(view.step, steps.length) - 1;
+  story.replaceChildren(slide(steps[k], data, k, steps.length, model));
+  story.querySelector("#next, .explore-links a")?.focus({ preventScroll: true });
+}
+
+/** Start the story of the name of the field. */
+function start() {
+  if ($("q").value.trim().split(/\s+/).join("").length < 4) {
+    $("q-label").textContent = "Your first and last name, please:";
+    return;
+  }
+  $("story").replaceChildren();
+  go({ step: 1 }, true);
+}
+$("start").addEventListener("click", start);
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && view.tab === "home") start();
+});
+document.addEventListener("keydown", (e) => { // the arrows go between the steps
+  if (view.tab !== "home" || view.step === 0 || e.target.closest?.("input")) return;
+  if (e.key === "ArrowRight" && $("next")) $("next").click();
+  if (e.key === "ArrowLeft") go({ step: view.step - 1 });
+});
+
+// ---------- updates ----------
 let run = 0;
-let limit = STEP;
+let limits = [STEP, STEP]; // the real names and the other names shown; More adds STEP to both
 async function update() {
   const id = ++run;
   try {
-    await render(id);
+    const source = byId.get(view.tab === "home" ? "world" : view.from); // the story is in the world
+    if (!ready.has(source.pack)) status.textContent = `Loading ${source.pack === "world" ? `the world file (${source.size})` : source.text}...`;
+    const model = await load(source.pack);
+    if (id !== run) return;
+    await ({ home: renderHome, anagrams: renderAnagrams }[view.tab] ?? renderName)(id, model, source);
   } catch (e) {
     if (id === run) status.textContent = `Error: ${e.message}`;
     throw e;
   }
 }
 
-/** Show the results of the query; stops when a newer update (id) starts while a file is loading. */
-async function render(id) {
-  const query = input.value;
-  const source = byId.get(current), pack = source.pack;
-  history.replaceState(null, "", `?${new URLSearchParams(query ? { q: query, from: current } : { from: current })}`);
-  if (!ready.has(pack)) status.textContent = `Loading ${pack === "world" ? `the world file (${source.size})` : source.text}...`;
-  const model = await load(pack);
-  if (id !== run) return;
-  const key = model.key(query);
-  if (key.length < 4) {
-    list.replaceChildren();
-    more.hidden = headline.hidden = origin.hidden = true;
-    status.textContent = key ? "Type at least 4 letters" : "";
-    return;
-  }
-  const need = model.need(query);
-  const part = model.partOf(query);
-  if (need.length || (part !== null && !model.hasPart(part))) {
-    await new Promise((resolve) => setTimeout(resolve, PAUSE));
-    if (id !== run) return; // the visitor typed again
-    status.textContent = need.length ? `Loading ${need.length} files of names...` : "Loading the real names...";
-    await Promise.all([...need.map(([side, c]) => loadChunk(model, pack, side, c)), part !== null && loadPart(model, pack, part)]);
-    if (id !== run) return;
-  }
-  const world = source.world;
-  const res = model.search(query, source.world || source.source === "INSEE" ? null : source.country, limit);
-  status.textContent = `${n(res.found)} name${res.found === 1 ? "" : "s"} · ${n(res.realNames)} real`;
-  const where = world ? "in the world" : `in ${english.of(source.country)}`;
-  headline.hidden = false;
-  headline.replaceChildren(!res.found
-    ? `No name ${where} is made of your letters.`
-    : res.realPeople
-      ? `At least ${people(res.realPeople)} ${where} ${res.realPeople === 1 ? "has" : "have"} a name made of your letters.`
-      : `No person ${where} in the data has a name made of your letters. These names could exist:`);
-  showOrigin(res, world, query.trim().split(/\s+/).length, model);
-  list.replaceChildren(...res.results.map((r, i) => row(r, i, model.key(r.first) + model.key(r.last) === key, world)));
-  more.hidden = res.found <= limit;
-}
-
 input.addEventListener("input", () => {
-  limit = STEP;
-  update();
+  limits = [STEP, STEP];
+  go({ q: input.value });
 });
+for (const side of ["first", "last"]) $(side).addEventListener("input", () => go({ [side]: $(side).value }));
 more.addEventListener("click", () => {
-  limit += STEP;
+  limits = limits.map((x) => x + STEP);
   update();
 });
+from.value = byId.get(view.from).text;
+show();
 update();
+// the field of the view, with a mouse only: on a phone, the focus opens the keyboard over the page
+if (matchMedia("(pointer: fine)").matches && !(view.tab === "home" && view.step > 0)) (["home", "anagrams"].includes(view.tab) ? input : view.tab === "last" ? $("last") : $("first")).focus();

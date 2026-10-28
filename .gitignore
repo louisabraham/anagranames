@@ -15,4 +15,3 @@ models/
 
 # Built by web/build.mjs
 web/anagram.js
-web/world_model.pdf

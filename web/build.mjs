@@ -1,5 +1,5 @@
 // Build the website in web/: anagram.js (app/anagram.ts without its types), the packs in data/ with the list of
-// the sources data/packs.json (the world, France from INSEE, and each country of the world pack), and the paper.
+// the sources data/packs.json (the world, France from INSEE, and each country of the world pack).
 // The world pack has its real full names in data/world.real/ and the data of its names in data/world.names/.
 // data/version.json gives the build version: a hash of the code and of the sizes and dates of the packs.
 // Run: node web/build.mjs   then serve web/, for example: python3 -m http.server -d web 8000
@@ -14,7 +14,7 @@ const web = `${root}web/`;
 const ts = readFileSync(`${root}app/anagram.ts`, "utf8");
 writeFileSync(`${web}anagram.js`, `// Built by web/build.mjs from app/anagram.ts: do not edit.\n${stripTypeScriptTypes(ts)}`);
 const hash = createHash("sha256");
-for (const file of ["anagram.js", "app.js", "name.js", "style.css"]) hash.update(readFileSync(`${web}${file}`));
+for (const file of ["anagram.js", "app.js", "style.css"]) hash.update(readFileSync(`${web}${file}`));
 
 mkdirSync(`${web}data`, { recursive: true });
 const packs = [];
@@ -38,5 +38,4 @@ for (const file of readdirSync(`${root}app/data`).sort()) {
 writeFileSync(`${web}data/packs.json`, JSON.stringify(packs));
 const version = hash.digest("hex").slice(0, 12);
 writeFileSync(`${web}data/version.json`, JSON.stringify({ version }));
-copyFileSync(`${root}docs/world_model.pdf`, `${web}world_model.pdf`, constants.COPYFILE_FICLONE);
-console.log(`web/: version ${version}, anagram.js, ${packs.length} sources, world_model.pdf`);
+console.log(`web/: version ${version}, anagram.js, ${packs.length} sources`);

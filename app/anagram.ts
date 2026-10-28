@@ -71,6 +71,8 @@ interface Meta {
 interface Entry {
   x: Float64Array; // X[id, c] for all pack countries
   seen: Uint8Array; // 1 if the name is seen in country c
+  countries: Uint8Array; // the countries where the name is seen, increasing
+  a: number; // log(alpha pi): X[id, c] + log(N_c + alpha) where the name is not seen
   vec: Float64Array | null; // null for names without a vector (the null score)
 }
 
@@ -97,6 +99,28 @@ export function oneIn(logP: number): string {
     if (x >= unit) return `1 in ${(x / unit).toFixed(1)} ${word}`;
   }
   return `1 in ${Math.round(x).toLocaleString("en-US")}`;
+}
+
+/** The ids 0 to n - 1 sorted by value, the largest first, then by id: a stable radix sort, 8 bits per pass. */
+function mostFirst(values: Float64Array): Uint32Array {
+  const n = values.length; // indexed loops: 20 to 40 times faster than from(..., fn) and for...of on millions
+  let max = 0;
+  for (let i = 0; i < n; i++) if (values[i] > max) max = values[i];
+  const key = new Uint32Array(n); // increasing key: decreasing value
+  let ids = new Uint32Array(n), next = new Uint32Array(n);
+  for (let i = 0; i < n; i++) {
+    key[i] = max - values[i];
+    ids[i] = i;
+  }
+  const count = new Uint32Array(257);
+  for (let shift = 0; shift < 32 && max >>> shift > 0; shift += 8) {
+    count.fill(0);
+    for (let i = 0; i < n; i++) count[((key[ids[i]] >>> shift) & 255) + 1]++;
+    for (let d = 0; d < 256; d++) count[d + 1] += count[d];
+    for (let i = 0; i < n; i++) next[count[(key[ids[i]] >>> shift) & 255]++] = ids[i];
+    [ids, next] = [next, ids];
+  }
+  return ids;
 }
 
 async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
@@ -165,7 +189,7 @@ class Side {
   readonly chunkSize: number;
   readonly chunks: (Chunk | undefined)[];
   private readonly alphaPrior: Float64Array; // alpha pi
-  private readonly logNorm: Float64Array; // log(N_c + alpha)
+  readonly logNorm: Float64Array; // log(N_c + alpha)
   private readonly books: Float32Array;
   private readonly groups: number;
   private readonly groupSize: number;
@@ -254,15 +278,16 @@ class Side {
       x[c] = Math.log(k.count[e] + a) - this.logNorm[c];
       seen[c] = 1;
     }
+    const countries = k.country.subarray(k.ptr[i], k.ptr[i + 1]);
     const r = k.row[i];
-    if (r < 0) return { x, seen, vec: null };
+    if (r < 0) return { x, seen, countries, a: Math.log(a), vec: null };
     const g = this.groupSize;
     const vec = new Float64Array(this.groups * g);
     for (let j = 0; j < this.groups; j++) {
       const at = (j * 256 + k.codes[r * this.groups + j]) * g;
       for (let t = 0; t < g; t++) vec[j * g + t] = this.books[at + t];
     }
-    return { x, seen, vec };
+    return { x, seen, countries, a: Math.log(a), vec };
   }
 }
 
@@ -279,7 +304,14 @@ export class Model {
   private readonly partHash: number[];
   private readonly partCache = new Map<number, Map<number, RealName>>(); // part -> key -> people
   private classes: { byRank: Uint32Array; byClass: Uint32Array; classStart: Uint32Array } | null = null;
+  readonly population: Float64Array; // of each pack country
   private readonly logW: Float64Array;
+  private base!: Float64Array; // log w_c - log Z_c, then - log(N_c + alpha) of both sides (after the sides)
+  private baseOrder!: Uint8Array; // the countries, largest base first
+  private baseMax = 0;
+  private baseScaled!: Float64Array; // exp(base - baseMax)
+  private baseSum = 0;
+  private readonly terms = new Float64Array(256); // the terms of the countries where a name is seen
   private readonly logZ: Float64Array;
   private readonly gates: Float64Array; // (C, k)
   private readonly offsets: Float64Array;
@@ -290,16 +322,26 @@ export class Model {
   private constructor(meta: Meta, section: Section) {
     this.source = meta.source;
     this.countries = meta.countries;
+    this.population = Float64Array.from(meta.population);
     const total = meta.population.reduce((s, p) => s + p, 0);
     this.logW = Float64Array.from(meta.population, (p) => Math.log(p / total));
     this.logZ = Float64Array.from(meta.log_z);
     this.gates = Float64Array.from(meta.gates.flat());
     this.offsets = Float64Array.from(meta.offsets);
+    // where neither name of a pair is seen, its term is a + base[c], with a the sum of the a of the two names
+    const C = meta.countries.length;
+    this.base = Float64Array.from({ length: C }, (_, c) => this.logW[c] - this.logZ[c]);
+    this.baseOrder = Uint8Array.from(this.base.keys()).sort((p, q) => this.base[q] - this.base[p]);
     this.k = meta.gates[0].length;
     this.table = letterTable(meta.letters);
     for (let i = 0; i < 26; i++) this.rank[meta.alphabet.charCodeAt(i) - 65] = i;
     this.first = new Side(meta, "first", section);
     this.last = new Side(meta, "last", section);
+    for (let c = 0; c < this.base.length; c++) this.base[c] -= this.first.logNorm[c] + this.last.logNorm[c];
+    this.baseOrder.sort((p, q) => this.base[q] - this.base[p]);
+    this.baseMax = this.base[this.baseOrder[0]];
+    this.baseScaled = this.base.map((b) => Math.exp(b - this.baseMax));
+    this.baseSum = this.baseScaled.reduce((s, x) => s + x, 0);
     this.minFirst = meta.min_first ?? 0;
     this.minLast = meta.min_last ?? 0;
     this.parts = meta.parts ?? 0;
@@ -367,13 +409,14 @@ export class Model {
     for (const b of bytes) if (b < 0x80) n++;
     const v = varints(bytes, new Float64Array(n));
     if (!this.classes) {
-      const F = this.first, L = this.last;
-      const byRank = Uint32Array.from(F.total.keys()).sort((a, b) => F.total[b] - F.total[a] || a - b);
-      const part = L.part!;
-      const byClass = Uint32Array.from(L.total.keys()).sort((a, b) => part[a] - part[b] || L.total[b] - L.total[a] || a - b);
+      const byRank = mostFirst(this.first.total);
+      const part = this.last.part!;
       const classStart = new Uint32Array(this.parts + 1);
-      for (const l of byClass) classStart[part[l] + 1]++;
+      for (let l = 0; l < part.length; l++) classStart[part[l] + 1]++;
       for (let c = 0; c < this.parts; c++) classStart[c + 1] += classStart[c];
+      const byClass = new Uint32Array(part.length), at = classStart.slice(0, this.parts);
+      const rankL = mostFirst(this.last.total);
+      for (let r = 0; r < rankL.length; r++) byClass[at[part[rankL[r]]]++] = rankL[r]; // each class in the order of the ranks
       this.classes = { byRank, byClass, classStart };
     }
     const { byRank, byClass, classStart } = this.classes;
@@ -532,9 +575,45 @@ export class Model {
       const lp = logSumExp(t);
       if (lp > bestLp) [best, bestLp] = [t, lp];
     }
-    if (!best) return null;
-    const out = Array.from(best, (x, c) => ({ country: this.countries[c], p: Math.exp(x - bestLp) }));
+    return best && this.byShare(best, bestLp, top);
+  }
+
+  /** p(c | f, l) for the full name (f, l): its most probable countries. */
+  shares(f: number, l: number, top = 5): Origin[] {
+    const fe = this.first.entry(f), le = this.last.entry(l);
+    const t = Float64Array.from(this.logW, (w, c) => w + this.logP(fe, le, c));
+    return this.byShare(t, logSumExp(t), top);
+  }
+
+  /** The countries of the terms t of the mixture (sum: exp(lp)), most probable first. */
+  private byShare(t: Float64Array, lp: number, top: number): Origin[] {
+    const out = Array.from(t, (x, c) => ({ country: this.countries[c], p: Math.exp(x - lp) }));
     return out.sort((a, b) => b.p - a.p).slice(0, top);
+  }
+
+  /** logPMixture, faster: the exact terms of the countries where f or l is seen (about 12 of 105); in the other
+   * countries neither name is seen, there is no pair term, and their terms sum to exp(a_f + a_l) times a constant
+   * per country. */
+  private mixture(f: Entry, l: Entry): [number, number] {
+    const fc = f.countries, lc = l.countries, terms = this.terms;
+    let i = 0, j = 0, n = 0, best = -1, top = -Infinity, rest = this.baseSum;
+    while (i < fc.length || j < lc.length) {
+      const c = j === lc.length || (i < fc.length && fc[i] <= lc[j]) ? fc[i] : lc[j];
+      if (i < fc.length && fc[i] === c) i++;
+      if (j < lc.length && lc[j] === c) j++;
+      const t = (terms[n++] = this.logW[c] + this.logP(f, l, c));
+      if (t > top) [top, best] = [t, c];
+      rest -= this.baseScaled[c];
+    }
+    const a = f.a + l.a;
+    for (const c of this.baseOrder) { // the largest term of the other countries
+      if (f.seen[c] || l.seen[c]) continue;
+      if (a + this.base[c] > top) [top, best] = [a + this.base[c], c];
+      break;
+    }
+    let sum = rest > 0 ? rest * Math.exp(a + this.baseMax - top) : 0;
+    for (let k = 0; k < n; k++) sum += Math.exp(terms[k] - top);
+    return [top + Math.log(sum), best];
   }
 
   /** log p(f, l) under the mixture of the pack countries, and the country with the largest term. */
@@ -600,6 +679,30 @@ export class Model {
 
   /** The anagram names of the query: the real full names first (most people first), then the most probable. */
   search(query: string, country: string | null = null, limit = 20): Search {
+    const r = this.ranked(query, country);
+    return { ...r.summary, results: r.order.slice(0, limit).map(r.result) };
+  }
+
+  /** The anagram names of the query in two lists: the real full names (most people first, at most realLimit) and
+   * the other names (most probable first, at most possibleLimit). */
+  searchSplit(query: string, country: string | null = null, realLimit = 20, possibleLimit = 20): Search & { possible: Result[] } {
+    const r = this.ranking(query, country);
+    return { ...r.summary, results: r.real(realLimit), possible: r.possible(possibleLimit) };
+  }
+
+  /** The anagrams of the query, ranked once, to read page by page: the summary, the first n real full names, and
+   * the first n other names. */
+  ranking(query: string, country: string | null = null) {
+    const { order, result, summary } = this.ranked(query, country);
+    return {
+      summary,
+      real: (n: number) => order.slice(0, Math.min(n, summary.realNames)).map(result),
+      possible: (n: number) => order.slice(summary.realNames, summary.realNames + n).map(result),
+    };
+  }
+
+  /** The anagrams of the query, scored and sorted (the real full names first), and the result of one of them. */
+  private ranked(query: string, country: string | null) {
     let [fs, ls] = this.anagrams(query);
     if (country === null && this.countries.length === 1) country = this.countries[0];
     const c = country === null ? -1 : this.countries.indexOf(country);
@@ -620,12 +723,12 @@ export class Model {
     for (let i = 0; i < fs.length; i++) {
       const f = get(this.first, firsts, fs[i]), l = get(this.last, lasts, ls[i]);
       if (c >= 0) lp[i] = this.logP(f, l, c);
-      else [lp[i], best[i]] = this.logPMixture(f, l);
+      else [lp[i], best[i]] = this.mixture(f, l);
     }
     const real = Float64Array.from(fs, (f, i) => this.real(f, ls[i], k));
     const order = Array.from(lp.keys())
       .sort((a, b) => real[b] - real[a] || lp[b] - lp[a] || fs[a] - fs[b] || ls[a] - ls[b]);
-    const results = order.slice(0, limit).map((i) => ({
+    const result = (i: number): Result => ({
       first: this.first.name(fs[i]),
       last: this.last.name(ls[i]),
       country: this.countries[best[i]],
@@ -636,9 +739,9 @@ export class Model {
       lastPeople: this.last.total[ls[i]],
       lastCountries: this.nameCountries("last", ls[i], k),
       realCountries: this.realCountries(fs[i], ls[i], k),
-    }));
+    });
     const realNames = real.reduce((s, x) => s + (x > 0 ? 1 : 0), 0);
     const realPeople = real.reduce((s, x) => s + x, 0);
-    return { query, country, found: fs.length, realNames, realPeople, origin: this.origin(query), results };
+    return { order, result, summary: { query, country, found: fs.length, realNames, realPeople, origin: this.origin(query) } };
   }
 }
