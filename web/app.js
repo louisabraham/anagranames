@@ -337,7 +337,7 @@ function globe() {
       info: (c, name) => {
         const v = shown.values.get(c);
         if (!c || !byId.has(c)) return { title: name, rows: [["Not in the data", ""]] };
-        return { title: countryName(c), rows: [["Real people", n(v?.real ?? 0)], ["Expected, model", about(v?.synthetic ?? 0)]] };
+        return { title: countryName(c), rows: [["Real", n(v?.real ?? 0)], ["Synthetic", about(v?.synthetic ?? 0)]] };
       },
     }));
   return globeLoad;

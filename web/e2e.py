@@ -592,7 +592,7 @@ def test_globe(page, base):
     page.wait_for_function("document.getElementById('globe').dataset.chosen === 'JP'", timeout=WAIT)
     page.wait_for_timeout(300)
     tip = page.text_content(".globe-tip")
-    for want in ("Japan", "Real people", n(expected("JP", q, 0)["real_people"]), "Expected, model"):
+    for want in ("Japan", "Real", n(expected("JP", q, 0)["real_people"]), "Synthetic"):
         assert want in tip, f"the box of Japan {tip!r} lacks {want}"
 
     def place(code):
