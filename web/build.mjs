@@ -14,7 +14,7 @@ const web = `${root}web/`;
 const ts = readFileSync(`${root}app/anagram.ts`, "utf8");
 writeFileSync(`${web}anagram.js`, `// Built by web/build.mjs from app/anagram.ts: do not edit.\n${stripTypeScriptTypes(ts)}`);
 const hash = createHash("sha256");
-for (const file of ["anagram.js", "app.js", "style.css"]) hash.update(readFileSync(`${web}${file}`));
+for (const file of ["anagram.js", "app.js", "globe.js", "globe.json", "style.css"]) hash.update(readFileSync(`${web}${file}`));
 
 mkdirSync(`${web}data`, { recursive: true });
 const packs = [];

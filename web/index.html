@@ -3,8 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ANAGRANAME</title>
-<meta name="description" content="Doppelgängers don't exist. But what about anagranames? People whose name has the same letters as yours.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:,">
+<title>ANAGRANAMES</title>
+<meta name="description" content="Who are your anagranames? The people whose full name has exactly the letters of yours.">
 <link rel="stylesheet" href="style.css">
 <script type="module">
 // The build version (data/version.json, written by web/build.mjs) is in the address of app.js and of the files
@@ -16,80 +18,48 @@ await import(`./app.js?v=${version}`);
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="./">Anagraname.</a>
-  <nav class="tabs" aria-label="Views">
-    <a id="tab-home" href="./">Home</a>
-    <a id="tab-anagrams" href="./">Anagrams</a>
-    <a id="tab-first" href="./">First<span class="long">&nbsp;name</span></a>
-    <a id="tab-last" href="./">Last<span class="long">&nbsp;name</span></a>
-    <a id="tab-full" href="./">Full<span class="long">&nbsp;name</span></a>
-  </nav>
+  <a class="brand" href="./">ANAGRANAMES</a>
   <a href="how.html">How it works</a>
 </header>
 <main class="wrap">
-  <div id="hero" class="hero">
-    <h1 id="title">Anagra&shy;name</h1>
-    <p id="tagline" class="tagline">people whose name has your letters.</p>
-  </div>
-  <div id="fields-anagrams">
-    <label for="q" id="q-label" class="prompt">What is your name?</label>
-    <input id="q" class="field" type="text" placeholder="Marie Curie" autocomplete="off" autocapitalize="words"
-      spellcheck="false" enterkeyhint="go">
-    <button id="start" type="button" hidden>Start →</button>
-  </div>
-  <div id="fields-names" class="fields" hidden>
-    <label id="first-field">First name
-      <input id="first" class="field" type="text" placeholder="Marie" autocomplete="off" autocapitalize="words" spellcheck="false">
-    </label>
-    <label id="last-field">Last name
-      <input id="last" class="field" type="text" placeholder="Curie" autocomplete="off" autocapitalize="words" spellcheck="false">
-    </label>
-  </div>
-  <div id="source-bar" class="bar">
-    <div class="combo">
-      <label for="from">In</label>
-      <input id="from" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="from-list"
-        autocomplete="off" spellcheck="false">
-      <ul id="from-list" role="listbox" aria-label="Countries" hidden></ul>
+  <section class="intro">
+    <h1>Who are your <span class="term">anagranames</span>?</h1>
+    <div class="entry" id="entry">
+      <p class="head"><dfn>anagraname</dfn> <span class="ipa">/ˌæn.ə.ɡrəˈneɪm/</span> <span class="pos">noun, neologism</span></p>
+      <p class="sense">A name composed of exactly the same letters as yours, in a different order. By extension, a person bearing that name.</p>
+      <p class="example">Arsène Lupin hides as Paul Sernine, his anagraname.</p>
     </div>
-    <span id="status" aria-live="polite"></span>
-    <button id="share" type="button" class="quiet">Copy link</button>
-  </div>
-  <section id="out-home" hidden>
-    <div id="story" class="story" aria-live="polite"></div>
-  </section>
-  <section id="out-anagrams">
-    <div id="anagram-panels" class="anagram-grid" hidden>
-      <h2 class="panel-title data-col">In the data <span>counted</span></h2>
-      <div id="headline" class="stat data-col"></div>
-      <ol id="results" class="results data-col"></ol>
-      <h2 class="panel-title model-col">Model estimate <span>computed</span></h2>
-      <div id="headline-model" class="stat model-col"></div>
-      <ol id="possible" class="results model-col"></ol>
-    </div>
-    <button id="more" type="button" hidden>More</button>
-  </section>
-  <section id="out-names" hidden>
-    <div class="panels">
-      <div class="panel">
-        <h2 class="panel-title">In the data <span>counted</span></h2>
-        <div id="summary" class="stat"></div>
-        <table id="countries" class="countries" hidden>
-          <thead><tr><th>Country</th><th>People</th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <button id="all" type="button" hidden>Show all</button>
+    <div class="dial">
+      <div class="readout">
+        <label for="q" class="visually-hidden">Your full name</label>
+        <span id="status" class="status" aria-live="polite"></span>
+        <input id="q" class="field" type="text" placeholder="Arsène Lupin" autocomplete="off" autocapitalize="words"
+          spellcheck="false" enterkeyhint="search">
       </div>
-      <div id="model-panel" class="panel" hidden>
-        <h2 class="panel-title">Model estimate <span>computed</span></h2>
-        <div id="estimate" class="stat"></div>
-        <table id="model-countries" class="countries estimate" hidden>
-          <thead><tr><th>Country</th><th>People expected</th></tr></thead>
-          <tbody></tbody>
-        </table>
+      <button id="synthetic" class="switch" type="button" role="switch" aria-checked="false">
+        <span class="switch-label">Synthetic people</span>
+        <span class="switch-row" aria-hidden="true">
+          <span class="switch-body"><span class="switch-knob"></span></span>
+          <span class="switch-state">OFF</span>
+          <span class="led"></span>
+        </span>
+      </button>
+    </div>
+  </section>
+  <section id="view" hidden>
+    <h2 id="headline" class="visually-hidden" aria-live="polite"></h2>
+    <div class="panes">
+      <div id="globe" class="globe">
+        <canvas role="img" aria-label="A globe of the countries: drag it to turn it; click a country to choose it (the list of the countries does the same)"></canvas>
+        <div class="globe-tip" hidden></div>
+      </div>
+      <div id="hist" class="hist pane"></div>
+      <div id="people" class="pane people">
+        <p class="pane-head"><span>Names</span><span id="names" class="count"></span></p>
+        <ol id="results" class="results"></ol>
+        <button id="more" class="chip" type="button" hidden>More</button>
       </div>
     </div>
-    <p id="links" class="links"></p>
   </section>
 </main>
 </body>

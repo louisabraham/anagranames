@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ANAGRANAME: how it works</title>
+<link rel="icon" href="data:,">
+<title>How it works · ANAGRANAMES</title>
 <meta name="description" content="Where the names come from, how the page finds the anagrams, and how the model gives their probability.">
 <link rel="stylesheet" href="style.css">
 <script type="module">
@@ -17,7 +18,7 @@ document.querySelector('link[href="style.css"]').href = `style.css?v=${version}`
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="./">Anagraname.</a>
+  <a class="brand" href="./">ANAGRANAMES</a>
   <a href="./">← Search</a>
 </header>
 <main class="wrap how">
@@ -37,13 +38,12 @@ document.querySelector('link[href="style.css"]').href = `style.css?v=${version}`
 <p>You type your name. The page finds the full names (one first name and one last name) that use exactly the
 same letters. For <i>Yuki Tanaka</i>, it finds <i>Yuki Nakata</i>, <i>Tanaka Yuki</i> and 32,432 other
 names.</p>
-<p>The page shows two kinds of names, and it keeps them apart:</p>
+<p>The page shows two kinds of people, and a switch chooses one:</p>
 <div class="pair">
-  <div><b>Real names</b><span>People in the data have this full name. The page counts them.</span></div>
-  <div><b>Possible names</b><span>Nobody in the data has this full name. A model computes its probability.</span></div>
+  <div><b>Real people</b><span>People in the data have this full name. The page counts them.</span></div>
+  <div><b>Synthetic people</b><span>Nobody in the data has this full name. A model computes its probability.</span></div>
 </div>
-<p>The tabs <i>First name</i>, <i>Last name</i> and <i>Full name</i> show how many people have a name, and in which
-countries.</p>
+<p>A globe and a list of the countries show where these people are. A click on a country shows its people only.</p>
 </section>
 
 <section>
