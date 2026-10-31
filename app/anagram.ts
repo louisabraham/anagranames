@@ -451,11 +451,6 @@ export class Model {
       .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   }
 
-  /** Id of the name of a side with the key of the text, or -1. */
-  nameId(side: "first" | "last", text: string): number {
-    return this.lookup(this[side], this.key(text));
-  }
-
   /** [country, people] of a name in the pack countries (or in pack country c), most people first. */
   nameCountries(side: "first" | "last", id: number, c = -1): [string, number][] {
     return this.byPeople(this[side].countries(id).filter(([k]) => c < 0 || k === c));
@@ -535,12 +530,6 @@ export class Model {
     return out;
   }
 
-  /** The chunks to read before nameId(side, text). */
-  needName(side: "first" | "last", text: string): [string, number][] {
-    const [a, b] = this.sameLetters(this[side], this.key(text));
-    return this.needIds(side, Array.from({ length: b - a }, (_, k) => a + k));
-  }
-
   /** The file of a chunk in the directory <pack>.names/ */
   chunkFile(side: string, c: number): string {
     return `${side}/${c.toString(16).padStart(4, "0")}.gz`;
@@ -576,13 +565,6 @@ export class Model {
       if (lp > bestLp) [best, bestLp] = [t, lp];
     }
     return best && this.byShare(best, bestLp, top);
-  }
-
-  /** p(c | f, l) for the full name (f, l): its most probable countries. */
-  shares(f: number, l: number, top = 5): Origin[] {
-    const fe = this.first.entry(f), le = this.last.entry(l);
-    const t = Float64Array.from(this.logW, (w, c) => w + this.logP(fe, le, c));
-    return this.byShare(t, logSumExp(t), top);
   }
 
   /** The countries of the terms t of the mixture (sum: exp(lp)), most probable first. */
@@ -685,23 +667,17 @@ export class Model {
     return { ...r.summary, results: r.order.slice(0, limit).map(r.result) };
   }
 
-  /** The anagram names of the query in two lists: the real full names (most people first, at most realLimit) and
-   * the other names (most probable first, at most possibleLimit). */
-  searchSplit(query: string, country: string | null = null, realLimit = 20, possibleLimit = 20): Search & { possible: Result[] } {
-    const r = this.ranking(query, country);
-    return { ...r.summary, results: r.real(realLimit), possible: r.possible(possibleLimit) };
-  }
-
   /** The anagrams of the query, ranked once, to read page by page: the summary, the first n real full names, and
    * the first n other names. */
   ranking(query: string, country: string | null = null) {
-    const { order, result, summary, byCountry, mass } = this.ranked(query, country);
+    const { order, result, summary, byCountry, mass, model } = this.ranked(query, country);
     return {
       summary,
       real: (n: number) => order.slice(0, Math.min(n, summary.realNames)).map(result),
       possible: (n: number) => order.slice(summary.realNames, summary.realNames + n).map(result),
+      model: (n: number) => model().slice(0, n).map(result), // all the names, the most probable first
       byCountry,
-      mass, // sum of p(f, l) of the synthetic names: times the population, the synthetic people expected
+      mass, // sum of p(f, l) of all the names: times the population, the people expected
     };
   }
 
@@ -722,15 +698,19 @@ export class Model {
       [fs, ls] = [fs.filter((_, i) => keep[i]), ls.filter((_, i) => keep[i])];
     }
     const k = this.countries.length > 1 ? c : -1; // the country of the people (-1: all the pack)
+    let real = Float64Array.from(fs, (f, i) => this.real(f, ls[i], k));
+    if (k >= 0) { // a country of the world: a synthetic name has no real person anywhere (else it is real elsewhere)
+      const keep = fs.map((f, i) => real[i] > 0 || this.real(f, ls[i], -1) === 0);
+      [fs, ls, real] = [fs.filter((_, i) => keep[i]), ls.filter((_, i) => keep[i]), real.filter((_, i) => keep[i])];
+    }
     const lp = new Float64Array(fs.length);
     const best = new Int32Array(fs.length).fill(c);
     const expected = c < 0 ? new Float64Array(this.countries.length) : null; // per country (the world only)
     for (let i = 0; i < fs.length; i++) {
       const f = get(this.first, firsts, fs[i]), l = get(this.last, lasts, ls[i]);
       if (c >= 0) lp[i] = this.logP(f, l, c);
-      else [lp[i], best[i]] = this.mixture(f, l, expected);
+      else [lp[i], best[i]] = this.mixture(f, l, real[i] > 0 ? null : expected); // synthetic: in all its countries
     }
-    const real = Float64Array.from(fs, (f, i) => this.real(f, ls[i], k));
     const order = Array.from(lp.keys())
       .sort((a, b) => real[b] - real[a] || lp[b] - lp[a] || fs[a] - fs[b] || ls[a] - ls[b]);
     const result = (i: number): Result => ({
@@ -748,8 +728,8 @@ export class Model {
     const realNames = real.reduce((s, x) => s + (x > 0 ? 1 : 0), 0);
     const realPeople = real.reduce((s, x) => s + x, 0);
     // Per country, most first (computed once, when asked; the search in the world only): the real people of the
-    // real full names, and the synthetic people that the model expects, as in the view of the country: the names
-    // whose first and last name are seen in it, and no real person with it there; P_c p(f, l | c) people each.
+    // real full names, and the people that the model expects, as in the view of the country: the names whose first
+    // and last name are seen in it, real there or real nowhere (synthetic); P_c p(f, l | c) people each.
     let counts: { real: [string, number][]; possible: [string, number][] } | null = null;
     const total = this.population.reduce((s, x) => s + x, 0);
     const byCountry = () => {
@@ -762,16 +742,19 @@ export class Model {
         for (const [cc, x] of this.realCountries(fs[i], ls[i], k)) {
           const j = index.get(cc)!;
           people[j] += x;
-          if (expected) synthetic[j] -= Math.exp(this.logW[j] + this.logP(f, l, j)); // real there: not synthetic
+          if (expected) synthetic[j] += Math.exp(this.logW[j] + this.logP(f, l, j)); // real there: the model too
         }
       }
       const list = (a: Float64Array, scale = 1) => Array.from(a, (x, i): [string, number] => [this.countries[i], x * scale])
         .filter(([, x]) => x > 1e-9).sort((p, q) => q[1] - p[1] || (p[0] < q[0] ? -1 : 1));
       return (counts = { real: list(people), possible: list(synthetic, total) });
     };
-    // the probability of the synthetic names together, in the people of the view (the world, or its country)
+    // the probability of all the names together, in the people of the view (the world, or its country)
     let mass = 0;
-    for (let i = 0; i < fs.length; i++) if (!(real[i] > 0)) mass += Math.exp(lp[i]);
-    return { order, result, byCountry, mass, summary: { query, country, found: fs.length, realNames, realPeople, origin: this.origin(query) } };
+    for (let i = 0; i < fs.length; i++) mass += Math.exp(lp[i]);
+    // the order of the model: all the names, the most probable first (computed once, when asked)
+    let byModel: number[] | null = null;
+    const model = () => (byModel ??= Array.from(lp.keys()).sort((a, b) => lp[b] - lp[a] || fs[a] - fs[b] || ls[a] - ls[b]));
+    return { order, result, byCountry, mass, model, summary: { query, country, found: fs.length, realNames, realPeople, origin: this.origin(query) } };
   }
 }

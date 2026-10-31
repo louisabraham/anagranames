@@ -90,11 +90,23 @@ addEventListener("popstate", (e) => {
 const synthetic = $("synthetic");
 function show() {
   if (input.value !== view.q) input.value = view.q;
+  $("clear").hidden = !view.q;
   synthetic.setAttribute("aria-checked", String(view.synthetic));
-  synthetic.querySelector(".switch-state").textContent = view.synthetic ? "ON" : "OFF";
   document.body.classList.toggle("synthetic", view.synthetic);
 }
-synthetic.addEventListener("click", () => go({ synthetic: !view.synthetic }, true));
+// The switch; a chosen country without people of the other kind: the world again.
+synthetic.addEventListener("click", () => {
+  const next = !view.synthetic, change = { synthetic: next };
+  if (shown.chosen && shown.q === view.q && !(next ? shown.counts.possible : shown.counts.real).some(([c, x]) => c === shown.chosen && x > 0)) {
+    change.from = "world";
+  }
+  go(change, true);
+});
+$("clear").addEventListener("click", () => {
+  limit = STEP;
+  go({ q: "" });
+  input.focus();
+});
 input.addEventListener("input", (e) => {
   if (!e.isComposing && input.value !== capital(input.value)) { // not a word in composition (Japanese, Chinese)
     const [a, b] = [input.selectionStart, input.selectionEnd];
@@ -169,15 +181,15 @@ function sameName(model, r, query) {
 /** A person of the list: the full name, and its real people, or the people that the model expects with it (its
  * probability times the people of the view; the chance that one exists in the hover text). */
 function row(r, isQuery, pop, max) {
-  const name = el("span", "name", span("first", r.first), " ", span("last", r.last));
-  if (isQuery) name.append(" ", span("tag you", "you"));
-  const x = r.real ? r.real : pop * Math.exp(r.logP);
+  const model = view.synthetic, e = pop * Math.exp(r.logP), x = model ? e : r.real; // the model: people expected
+  const name = el("span", "name", el("span", "who", span("first", r.first), " ", span("last", r.last)));
+  if (model && r.real) name.append(span("tag real", `${n(r.real)} real`)); // a real name among the synthetic ones
   const meter = span("meter", "");
   meter.style.width = `${(100 * x) / max}%`;
-  const value = span("value", r.real ? n(r.real) : about(x));
-  const li = el("li", r.real ? "real" : "synthetic", name, el("span", "htrack", meter), value);
-  li.title = r.real ? `${people(r.real)}: ${r.realCountries.map(([c]) => countryName(c)).join(", ")}`
-    : `${about(x)} people expected: a chance of ${chance(x)} that one exists`;
+  const value = span("value", model ? about(e) : n(r.real));
+  const li = el("li", `${r.real ? "real" : "synthetic"}${isQuery ? " you" : ""}`, name, el("span", "htrack", meter), value);
+  const where = r.real ? `${people(r.real)} in the data: ${r.realCountries.map(([c]) => countryName(c)).join(", ")}` : "";
+  li.title = model ? [`${about(e)} people expected: a chance of ${chance(e)} that one exists`, where].filter(Boolean).join(". ") : where;
   return li;
 }
 
@@ -208,22 +220,37 @@ async function render(id, model, source) {
   }
   const ranking = searches.get(`${source.id}|${letters(model, query)}`) ?? (await search(id, model, source, query));
   if (!ranking) return; // a newer update started
-  const sum = ranking.summary, others = sum.found - sum.realNames, world = source.world;
-  const where = world ? "" : `in ${source.text}`, pop = populationOf(model, source); // the world: no words
+  const sum = ranking.summary;
+  const where = source.world ? "" : `in ${source.text}`, pop = populationOf(model, source); // the world: no words
   status.textContent = "";
   if (!view.synthetic) {
     stat(sum.realPeople ? `${n(sum.realPeople)} real ${sum.realPeople === 1 ? "person" : "people"}` : "No real person", where);
-  } else stat(others ? `≈ ${about(pop * ranking.mass)} synthetic people` : "No synthetic person", where);
-  $("names").textContent = n(view.synthetic ? others : sum.realNames);
+  } else stat(sum.found ? `≈ ${about(pop * ranking.mass)} people expected` : "No name", where);
+  $("names").textContent = n(view.synthetic ? sum.found : sum.realNames);
   headline.dataset.key = `${sum.found}|${sum.realNames}`; // for the tests
   headline.dataset.mode = view.synthetic ? "synthetic" : "real";
-  const rows = view.synthetic ? ranking.possible(limit) : ranking.real(limit);
-  const top = rows.length ? (rows[0].real || pop * Math.exp(rows[0].logP)) : 1; // the first: the most people
+  const rows = view.synthetic ? ranking.model(limit) : ranking.real(limit); // synthetic: all the names, as the model sees them
+  const top = rows.length ? (view.synthetic ? pop * Math.exp(rows[0].logP) : rows[0].real) : 1; // the first: the most people
+  const focused = [...list.children].indexOf(document.activeElement); // the keyboard: the same row after a new list
   list.replaceChildren(...rows.map((r) => row(r, sameName(model, r, query), pop, top)));
-  more.hidden = rows.length >= (view.synthetic ? others : sum.realNames);
+  rove($("people"), focused);
+  more.hidden = rows.length >= (view.synthetic ? sum.found : sum.realNames);
   $("view").hidden = false;
   if (!more.hidden && near(more)) requestAnimationFrame(() => more.click()); // the screen is not full yet
   await countries(id, query, source);
+}
+
+/** The message at the top of the globe, always about the world (not the chosen country): the real names; with the
+ * synthetic names, the names generated too. sum: the summary of the search in the world. */
+function tally(sum) {
+  const count = (x, one, many) => [el("b", "", n(x)), ` ${x === 1 ? one : many}`], synthetic = sum.found - sum.realNames;
+  const lines = [el("p", "real", ...(sum.realNames ? [...count(sum.realNames, "anagraname has", "anagranames have"), " Facebook accounts"]
+    : ["No anagraname has Facebook accounts"]))];
+  if (view.synthetic) {
+    lines.push(el("p", "generated", ...(synthetic ? [...count(synthetic, "synthetic anagraname", "synthetic anagranames"), " generated"]
+      : ["No synthetic anagraname generated"])));
+  }
+  $("tally").replaceChildren(...lines);
 }
 
 /** The number of the view, and its country (the world: no words). */
@@ -233,7 +260,7 @@ function stat(value, where) {
 
 // The next people load when the end of the list comes near the screen (or near the end of its panel, when the panel
 // scrolls); the More button stays for the keyboard.
-const pane = $("people");
+const pane = $("people-body"); // the list scrolls in its panel (a computer), else with the page
 const scrolls = () => pane.scrollHeight > pane.clientHeight + 1 && getComputedStyle(pane).overflowY !== "visible";
 const near = (el) => (scrolls() ? el.offsetTop - pane.scrollTop < pane.clientHeight + 600 : el.getBoundingClientRect().top < innerHeight + 800);
 pane.addEventListener("scroll", () => {
@@ -258,7 +285,9 @@ async function countries(id, query, source) {
   const ranking = searches.get(`world|${letters(wm, query)}`) ?? (await search(id, wm, byId.get("world"), query));
   if (!ranking || id !== run) return;
   const counts = ranking.byCountry(), chosen = source.pack === "world" && !source.world ? source.country : null;
-  const rows = view.synthetic ? counts.possible : counts.real;
+  tally(ranking.summary); // the world
+  const rows = [...(view.synthetic ? counts.possible : counts.real)]; // a copy: the counts are kept with the search
+  if (chosen && !rows.some(([c]) => c === chosen)) rows.push([chosen, 0]); // the chosen country is always there: a click on it, the world
   const unit = (x) => (view.synthetic ? about(x) : n(x));
   const box = $("hist"), max = rows[0]?.[1] ?? 1;
   const bars = rows.map(([c, x]) => { // all the countries: the panel scrolls
@@ -270,34 +299,35 @@ async function countries(id, query, source) {
     const meter = span("meter", "");
     meter.style.width = `${(100 * x) / max}%`;
     b.append(span("hname", countryName(c)), el("span", "htrack", meter), span("tip", unit(x)));
-    b.addEventListener("click", () => choose(c));
+    b.addEventListener("click", () => {
+      b.focus({ preventScroll: true }); // Safari gives no focus to a button on a click: the arrows then go from here
+      choose(c);
+    });
     return b;
   });
-  const title = el("p", "pane-head", span("", "Countries"));
-  if (view.from !== "world") { // the chosen country, or France from INSEE: a button for the world again
-    const back = el("button", "chip", `${byId.get(view.from).text} ×`);
-    back.id = "to-world";
-    back.type = "button";
-    back.title = "All the countries again";
-    back.addEventListener("click", () => go({ from: "world" }, true));
-    title.append(back);
+  const body = el("div", "pane-body", ...bars), at = $("hist").querySelector(".pane-body")?.scrollTop ?? 0;
+  const focused = document.activeElement?.closest?.("#hist .hbar")?.dataset.country; // the keyboard: the same country
+  box.replaceChildren(el("p", "pane-head", span("", "Countries"), span("count", n(rows.length))), body, ...box.querySelectorAll(".sbar"));
+  rove(box, focused ? bars.findIndex((b) => b.dataset.country === focused) : -1);
+  body.scrollTop = at; // the same place in the list after a choice, with the chosen country in view
+  const row = body.querySelector(".chosen");
+  if (row && (row.offsetTop < body.scrollTop || row.offsetTop + row.offsetHeight > body.scrollTop + body.clientHeight)) {
+    body.scrollTop = row.offsetTop - body.clientHeight / 2;
   }
-  title.append(span("count", n(rows.length)));
-  box.replaceChildren(title, ...bars);
   box.dataset.mode = view.synthetic ? "synthetic" : "real"; // for the tests
   // the globe: the same countries and the same choice
   const values = new Map(counts.possible.map(([c, x]) => [c, { real: 0, synthetic: x }]));
   for (const [c, x] of counts.real) values.set(c, { real: x, synthetic: values.get(c)?.synthetic ?? 0 });
-  shown = { values, chosen };
+  shown = { values, chosen, counts, q: query };
   const g = await globe();
   if (id !== run) return;
   g.setData(values, view.synthetic ? "synthetic" : "real");
   g.select(chosen);
 }
 
-/** Choose a country (from the list or the globe); the chosen country again: the world. */
+/** Choose a country (from the list or the globe); the chosen country again, or none: the world. */
 function choose(c) {
-  go({ from: c === shown.chosen ? "world" : c }, true);
+  go({ from: !c || c === shown.chosen ? "world" : c }, true); // null: the globe outside a country of the data
 }
 
 // The globe (globe.js and the countries of globe.json, loaded with the first people).
@@ -309,21 +339,193 @@ function globe() {
       info: (c, name) => {
         const v = shown.values.get(c);
         if (!c || !byId.has(c)) return { title: name, rows: [["Not in the data", ""]] };
-        return { title: countryName(c), rows: [["Real people", n(v?.real ?? 0)], ["Synthetic, expected", about(v?.synthetic ?? 0)]],
-          hint: c === shown.chosen ? "Click: all the countries" : "Click to choose" };
+        return { title: countryName(c), rows: [["Real people", n(v?.real ?? 0)], ["Expected, model", about(v?.synthetic ?? 0)]] };
       },
     }));
   return globeLoad;
 }
 
-// The three panels (globe, countries, people) fill the screen under the question: at least 400 px.
+// The scroll bars of the two lists: a thin line and a rectangle on it, drawn by the page (the same in all browsers; the
+// bar of the browser is hidden). Drag the rectangle, or click the line.
+function scrollbar(pane) {
+  const bar = el("div", "sbar"), thumb = el("i", "sthumb");
+  bar.append(thumb);
+  bar.setAttribute("aria-hidden", "true");
+  pane.append(bar);
+  const body = () => pane.querySelector(".pane-body"); // the list of the countries makes a new one at each view
+  const draw = () => {
+    const b = body(), room = b?.clientHeight ?? 0, can = b ? b.scrollHeight - room : 0;
+    bar.hidden = !b || can <= 1 || getComputedStyle(b).overflowY === "visible";
+    if (bar.hidden) return;
+    const h = Math.max(28, (room * room) / b.scrollHeight);
+    bar.style.top = `${b.offsetTop}px`;
+    bar.style.height = `${room}px`;
+    thumb.style.height = `${h}px`;
+    thumb.style.transform = `translateY(${(b.scrollTop / can) * (room - h)}px)`;
+  };
+  const sizes = new ResizeObserver(draw);
+  new MutationObserver(() => {
+    if (body()) sizes.observe(body());
+    draw();
+  }).observe(pane, { childList: true, subtree: true });
+  pane.addEventListener("scroll", draw, { capture: true, passive: true });
+  bar.addEventListener("pointerdown", (e) => {
+    const b = body(), room = b.clientHeight, h = thumb.offsetHeight, per = (b.scrollHeight - room) / (room - h);
+    e.preventDefault();
+    if (e.target !== thumb) b.scrollTop = (e.clientY - bar.getBoundingClientRect().top - h / 2) * per; // the line: there
+    const [y0, s0] = [e.clientY, b.scrollTop];
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add("held");
+    const move = (ev) => (b.scrollTop = s0 + (ev.clientY - y0) * per);
+    bar.addEventListener("pointermove", move);
+    bar.addEventListener("pointerup", () => {
+      bar.removeEventListener("pointermove", move);
+      bar.classList.remove("held");
+    }, { once: true });
+  });
+}
+scrollbar($("hist"));
+scrollbar($("people"));
+
+// The keyboard in the two lists (not in the order of Tab): Arrow Down in the field, or a click on a row, goes to a list;
+// the arrows up and down go from row to row (Home, End, Page Up, Page Down); left and right go to the other list. Enter
+// or Space on a country: this country, or the world again. With a country chosen, the arrows choose the next country at
+// once; with the world, they only move.
+const items = (pane) => [...pane.querySelectorAll(".hbar, #results li")];
+let nameAt = 0, countryAt = 0; // the last rows with the focus: the places of Arrow Right and Arrow Left
+/** After a new list: no row in the order of Tab; focus: the index of the row that had the focus (it keeps it). */
+function rove(pane, focus = -1) {
+  const all = items(pane);
+  for (const r of all) r.tabIndex = -1;
+  if (focus >= 0 && all[focus]) all[focus].focus({ preventScroll: true });
+}
+function goTo(pane, i) {
+  const all = items(pane), row = all[Math.max(0, Math.min(all.length - 1, i))];
+  if (!row) return null;
+  row.focus({ preventScroll: true });
+  row.scrollIntoView({ block: "nearest" });
+  if (pane.id === "people") nameAt = all.indexOf(row);
+  else countryAt = all.indexOf(row);
+  return row;
+}
+/** The country of a row, chosen by the arrows when a country is chosen (with the world: no choice); the same entry of
+ * the history (the back button: the view before the arrows). */
+function pick(row) {
+  const c = row?.dataset.country;
+  if (c && shown.chosen && c !== shown.chosen) go({ from: c });
+}
+/** The row of the countries to go to: the chosen country, else the last one with the focus. */
+const firstCountry = () => {
+  const i = items($("hist")).findIndex((r) => r.classList.contains("chosen"));
+  return i >= 0 ? i : countryAt;
+};
+for (const pane of [$("hist"), $("people")]) {
+  pane.addEventListener("keydown", (e) => {
+    const all = items(pane), i = all.indexOf(document.activeElement);
+    if (i < 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      return pane.id === "hist" ? goTo($("people"), nameAt) : goTo($("hist"), countryAt);
+    }
+    const page = Math.max(1, Math.floor(pane.querySelector(".pane-body").clientHeight / all[i].offsetHeight) - 1);
+    const to = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: all.length - 1, PageDown: i + page, PageUp: i - page }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    const row = goTo(pane, to);
+    if (pane.id === "hist") pick(row);
+  });
+}
+$("people").addEventListener("focusin", (e) => {
+  const i = items($("people")).indexOf(e.target);
+  if (i >= 0) nameAt = i;
+});
+$("hist").addEventListener("focusin", (e) => {
+  const i = items($("hist")).indexOf(e.target);
+  if (i >= 0) countryAt = i;
+});
+// The arrows with the focus out of the field and out of the lists (on the page, the globe, a button): up, down and left
+// go to the countries (the chosen one, else the last one with the focus), right to the names.
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || $("view").hidden) return;
+  if (e.target.closest?.("input, textarea, .hbar, #results li") || !items($("hist")).length) return;
+  const to = { ArrowDown: "hist", ArrowUp: "hist", ArrowLeft: "hist", ArrowRight: "people" }[e.key];
+  if (!to) return;
+  e.preventDefault();
+  if (to === "hist") goTo($("hist"), firstCountry());
+  else goTo($("people"), nameAt);
+});
+// The key S: the switch of the synthetic people (not in the field: it is a letter of a name).
+document.addEventListener("keydown", (e) => {
+  if (e.key.toLowerCase() !== "s" || e.altKey || e.ctrlKey || e.metaKey || e.target.closest?.("input, textarea")) return;
+  e.preventDefault();
+  synthetic.click();
+});
+// Enter or Escape in the field: the field lets the focus go (on a phone, the keyboard closes).
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === "Escape") input.blur();
+});
+input.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" || $("view").hidden || !items($("hist")).length) return;
+  e.preventDefault();
+  goTo($("hist"), firstCountry());
+});
+
+// The three panels (globe, countries, people) fill the window under the question, and no more (the page does not
+// scroll on a computer): at least 320 px.
 function fit() {
   const panes = document.querySelector(".panes");
-  if (!$("view").hidden) document.documentElement.style.setProperty("--rest", `${Math.max(400, innerHeight - panes.offsetTop - 24)}px`);
+  const credit = document.querySelector(".credit").offsetHeight; // the banner under the panels
+  if (!$("view").hidden) document.documentElement.style.setProperty("--rest", `${Math.max(320, innerHeight - panes.offsetTop - 16 - credit)}px`);
 }
 addEventListener("resize", fit);
 new ResizeObserver(fit).observe(document.querySelector(".intro"));
 new MutationObserver(fit).observe($("view"), { attributes: true, attributeFilter: ["hidden"] });
+
+// The definition of the word: open while a mouse is over the word or the card; a click keeps it open (a finger, the
+// keyboard); a click outside, Escape or a second click closes it. Its card starts under the word, in the page.
+const term = $("term"), entry = $("entry");
+let pinned = false, leaving = 0;
+function place() {
+  const room = entry.parentElement.clientWidth - entry.offsetWidth;
+  entry.style.setProperty("--entry-left", `${Math.max(0, Math.min(term.offsetLeft, room))}px`);
+  const title = term.closest("h1"); // under the title (the word can be on its second line)
+  entry.style.top = `${title.offsetTop + title.offsetHeight + 4}px`;
+}
+function define(open) {
+  clearTimeout(leaving);
+  if (open === !entry.hidden) return;
+  entry.hidden = !open;
+  term.setAttribute("aria-expanded", String(open));
+  if (open) place();
+}
+function close() {
+  pinned = false;
+  define(false);
+}
+for (const el of [term, entry]) {
+  el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && define(true));
+  el.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "mouse" && !pinned) leaving = setTimeout(() => define(false), 180);
+  });
+}
+term.addEventListener("click", () => {
+  pinned = entry.hidden || !pinned; // closed, or open on hover: keep it open; kept open: close it
+  define(pinned);
+});
+document.addEventListener("pointerdown", (e) => !entry.hidden && !e.target.closest("#term, #entry") && close());
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || entry.hidden) return;
+  e.preventDefault(); // Escape closes the definition only
+  close();
+});
+// Escape out of the field: no country chosen (the world again), and no row with the focus (the arrows go to the lists
+// again). The definition open: it closes first.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.defaultPrevented || !entry.hidden || e.target.closest?.("input, textarea")) return;
+  if (document.activeElement?.closest?.(".hbar, #results li")) document.activeElement.blur();
+  if (shown.chosen) go({ from: "world" }, true);
+});
+addEventListener("resize", () => entry.hidden || place());
 
 show();
 update();

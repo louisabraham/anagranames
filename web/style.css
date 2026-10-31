@@ -79,6 +79,12 @@ a {
   color: var(--phos);
   text-underline-offset: 3px;
 }
+.hbar:focus-visible,
+.results li:focus-visible { /* a row of a list, with the keyboard */
+  outline: 1px solid var(--phos);
+  outline-offset: -1px;
+  background: rgba(0, 255, 229, 0.1);
+}
 a:focus-visible,
 button:focus-visible {
   outline: 1px solid var(--phos);
@@ -129,27 +135,63 @@ button {
 
 /* the question, and the definition of the word: an entry of a dictionary */
 .intro {
+  position: relative; /* the definition opens over the page, under the title */
   padding: clamp(20px, 4vh, 44px) 0 4px;
 }
 h1 {
-  margin: 0;
+  margin: 0 0 clamp(16px, 2.6vh, 24px);
   font: 400 clamp(28px, 4.6vw, 60px) / 1.05 var(--mono);
   letter-spacing: -0.02em;
   text-transform: uppercase;
   color: var(--white);
   text-shadow: 0 0 8px rgba(0, 255, 229, 0.35);
 }
+/* the word: a button with a dotted line (a word with a definition); the definition: a card under it, on hover (a
+   mouse) or a click (a finger, the keyboard) */
 h1 .term {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-shadow: inherit;
   color: var(--phos);
+  text-decoration: underline dotted 2px rgba(0, 255, 229, 0.6);
+  text-underline-offset: 0.18em;
+  cursor: help;
+}
+.nowrap {
+  white-space: nowrap;
+}
+h1 .term[aria-expanded="true"] {
+  text-decoration-style: solid;
 }
 .entry {
+  position: absolute;
+  z-index: 30;
+  left: var(--entry-left, 0px);
   display: grid;
   gap: 4px;
-  max-width: 44rem;
-  margin: 18px 0 22px;
+  width: min(40rem, 100%);
+  margin-top: -6px;
   padding: 14px 20px 16px;
+  border: 1px solid var(--phos-2);
   border-left: 2px solid var(--phos);
-  background: linear-gradient(90deg, rgba(0, 255, 229, 0.07), transparent 80%);
+  background: rgba(1, 12, 15, 0.97);
+  box-shadow: 0 0 22px rgba(0, 255, 229, 0.18), 0 14px 32px rgba(0, 0, 0, 0.7);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .entry:not([hidden]) {
+    animation: unfold 0.14s ease-out;
+  }
+  @keyframes unfold {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+  }
 }
 .entry p {
   margin: 0;
@@ -205,10 +247,10 @@ h1 .term {
   min-width: 0;
   padding: 16px;
 }
-.status { /* inside the glass, at the right */
+.status { /* inside the glass, at the right (left of the cross) */
   position: absolute;
   top: 50%;
-  right: 30px;
+  right: 74px;
   z-index: 1;
   max-width: 45%;
   overflow: hidden;
@@ -224,6 +266,30 @@ h1 .term {
 }
 .readout:has(.status:not(:empty)) .field {
   padding-right: 46%;
+}
+.readout:has(.clear:not([hidden])) .field {
+  padding-right: 64px;
+}
+.clear { /* the cross: clears the name */
+  position: absolute;
+  top: 50%;
+  right: 26px;
+  z-index: 1;
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: 28px/1 var(--mono);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+.clear:hover {
+  border-color: var(--phos-2);
+  color: var(--phos);
+  text-shadow: var(--glow);
 }
 .field {
   display: block;
@@ -264,65 +330,84 @@ h1 .term {
   background: linear-gradient(rgba(255, 255, 255, 0.07), transparent);
   pointer-events: none;
 }
+/* the switch: a key with its lamp in the cap (lit and pressed in: on), its words painted beside it */
 .switch {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 10px;
+  align-items: center;
+  gap: 16px;
   margin: 0;
-  padding: 12px 18px;
+  padding: 12px 22px 12px 18px;
   border: 0;
-  color: #a3b6b8;
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  color: #e3eeee;
+  text-align: left;
   text-shadow: 0 1px 0 #000;
   cursor: pointer;
 }
-.switch-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.switch-body { /* the slot of the lever */
+.key {
   position: relative;
-  width: 54px;
-  height: 24px;
-  border: 1px solid #0b0f10;
-  background: linear-gradient(#000, #021418);
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.12);
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border: 1px solid #070a0b;
+  border-radius: 5px;
+  background: linear-gradient(#5b6b6f, #283234);
+  box-shadow: 0 4px 0 #070a0b, 0 6px 10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transform: translateY(-2px);
+  transition: transform 0.08s ease-out, box-shadow 0.08s ease-out;
 }
-.switch-knob { /* the lever */
+.switch:hover .key {
+  background: linear-gradient(#66777b, #2d383a);
+}
+.switch[aria-checked="true"] .key { /* pressed in */
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 #070a0b, 0 2px 4px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+.lamp { /* the lamp of the key */
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 24px;
-  height: 18px;
-  border: 1px solid #93a8ab;
-  background: linear-gradient(#7d9093, #2a3638);
-  box-shadow: 0 1px 0 #000, inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  transition: left 0.12s ease-out;
+  top: 8px;
+  right: 9px;
+  left: 9px;
+  height: 7px;
+  border-radius: 2px;
+  background: #062824;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.9);
 }
-.switch[aria-checked="true"] .switch-knob {
-  left: 26px;
+.switch[aria-checked="true"] .lamp {
+  background: var(--phos);
+  box-shadow: 0 0 6px var(--phos), 0 0 18px rgba(0, 255, 229, 0.7);
 }
-.switch-state {
-  min-width: 3ch;
-}
-.switch[aria-checked="true"] .switch-state {
+.hotkey { /* the key of the switch: [S], the brackets drawn close to the letter (the brackets of the font are wide) */
+  position: relative;
+  display: inline-block;
+  margin-right: 0.12em;
+  padding: 0 0.34em;
+  letter-spacing: 0;
   color: var(--phos);
   text-shadow: var(--glow);
 }
-.led {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #05302b;
-  box-shadow: inset 0 0 2px #000;
+.hotkey::before,
+.hotkey::after {
+  content: "";
+  position: absolute;
+  top: 0.12em;
+  bottom: 0.1em;
+  width: 0.2em;
+  border: 0.09em solid currentColor;
+  filter: drop-shadow(0 0 3px rgba(0, 255, 229, 0.55));
 }
-.switch[aria-checked="true"] .led {
-  background: var(--phos);
-  box-shadow: 0 0 6px var(--phos), 0 0 16px rgba(0, 255, 229, 0.6);
+.hotkey::before {
+  left: 0;
+  border-right: 0;
+}
+.hotkey::after {
+  right: 0;
+  border-left: 0;
+}
+.switch-label {
+  font-size: clamp(15px, 1.5vw, 18px);
+  line-height: 1.25;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .chip {
@@ -344,18 +429,28 @@ h1 .term {
    two others, then all in one column */
 .panes {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.85fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); /* the two lists: the same width */
   gap: 14px;
-  height: var(--rest, clamp(420px, calc(100svh - 420px), 680px)); /* --rest: the screen under the question (app.js) */
-  margin: 10px 0 24px;
+  height: var(--rest, clamp(320px, calc(100svh - 300px), 680px)); /* --rest: the window under the question (app.js) */
+  margin: 10px 0 16px;
 }
 .panes > * {
   min-height: 0;
 }
-.pane {
-  overflow-y: auto;
+.pane { /* a header that stays, and a body that scrolls */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px 0 0 12px;
   border: 1px solid var(--line);
   background: rgba(0, 12, 16, 0.6);
+}
+.pane-body {
+  position: relative; /* the place of a row in the list (app.js) */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 20px; /* the scroll bar */
 }
 @media (max-width: 1099px) {
   .panes {
@@ -363,8 +458,11 @@ h1 .term {
     grid-template-rows: clamp(320px, 50vh, 460px) auto;
     height: auto;
   }
-  .people {
+  .people { /* under the two others: the list goes with the page */
     grid-column: 1 / -1;
+    overflow: visible;
+  }
+  .people .pane-body {
     overflow: visible;
   }
 }
@@ -376,37 +474,88 @@ h1 .term {
   .hist {
     max-height: 440px;
   }
-}
-/* the scroll bar of a panel: a scale (a line every 10 px) and a cyan cursor; Firefox: its colors only */
-@supports not selector(::-webkit-scrollbar) {
-  .pane {
-    scrollbar-width: thin;
-    scrollbar-color: var(--phos) rgba(0, 255, 229, 0.08);
+  .hist .pane-body {
+    max-height: 380px;
   }
 }
-.pane::-webkit-scrollbar {
-  width: 12px;
+/* the scroll bar of a list (app.js): a thin line, and a rectangle on it; the bar of the browser is hidden */
+.pane {
+  position: relative;
 }
-.pane::-webkit-scrollbar-track {
-  border-left: 1px solid var(--line);
-  background: repeating-linear-gradient(to bottom, rgba(0, 255, 229, 0.35) 0 1px, transparent 1px 10px) 50% 0 / 5px 100% no-repeat,
-    rgba(0, 14, 18, 0.8);
+.pane-body {
+  scrollbar-width: none;
 }
-.pane::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  background: var(--phos) padding-box;
+.pane-body::-webkit-scrollbar {
+  display: none;
 }
-.pane::-webkit-scrollbar-thumb:hover {
-  background: var(--white) padding-box;
+.sbar {
+  position: absolute;
+  right: 3px;
+  width: 14px;
+  cursor: pointer;
+  touch-action: none;
 }
-.pane::-webkit-scrollbar-corner {
-  background: transparent;
+.sbar::before { /* the line */
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--phos-2);
+}
+.sthumb { /* the rectangle */
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 8px;
+  background: var(--phos);
+  box-shadow: 0 0 6px rgba(0, 255, 229, 0.55);
+  cursor: grab;
+}
+.sbar:hover .sthumb,
+.sbar.held .sthumb {
+  background: var(--white);
+}
+.sbar.held .sthumb {
+  cursor: grabbing;
+}
+/* the globe panel: the message of the view at the top, the globe under it */
+.globe-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line);
+  background: radial-gradient(ellipse at 50% 55%, #052530 0%, #020c12 55%, #01060a 100%);
+}
+.tally {
+  flex: none;
+  min-height: calc(3em + 9px); /* room for two lines: the globe does not move with the switch */
+  margin: 12px 12px 0;
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tally p {
+  margin: 0;
+}
+.tally b {
+  font-weight: 400;
+  color: var(--white);
+  text-shadow: 0 0 6px rgba(0, 255, 229, 0.45);
+}
+.tally .generated b {
+  color: var(--phos);
 }
 .globe {
   position: relative;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
-  background: radial-gradient(ellipse at 50% 45%, #052530 0%, #020c12 55%, #01060a 100%);
   color: var(--phos);
   font-size: 11px;
   letter-spacing: 0.08em;
@@ -465,18 +614,13 @@ h1 .term {
   margin-top: 4px;
   opacity: 0.65;
 }
-.hist {
-  overflow-y: auto;
-  padding: 12px;
-  border: 1px solid var(--line);
-  background: rgba(0, 12, 16, 0.6);
-}
 /* the two lists (countries, names): the same header (a title, a count) and the same rows (a label, a bar, a number) */
 .pane-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 0 6px;
+  flex: none;
+  margin: 0 20px 6px 0;
   padding: 0 8px 8px;
   border-bottom: 1px solid var(--line);
   font-size: 12px;
@@ -488,23 +632,32 @@ h1 .term {
   margin-left: auto;
   color: var(--muted);
 }
-.pane-head .chip {
-  padding: 3px 8px;
-  font-size: 11px;
+/* a list is a grid, and its rows share its columns (subgrid): the bars start on one line. The countries: a fixed part
+   for the names (a long one is cut); the names of people: the width of the longest one (else they are cut), the bars
+   the rest. The numbers: 7 characters. */
+.hist .pane-body,
+.results {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(32px, 1fr) 7ch;
+  align-content: start;
+  column-gap: 12px;
+}
+.results {
+  grid-template-columns: minmax(0, max-content) minmax(24px, 1fr) 7ch;
 }
 .hbar,
 .results li {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(32px, 1fr) 7ch; /* the same columns in each row: the bars start on one line */
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 12px;
   width: 100%;
   margin: 0;
   padding: 5px 8px;
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.35;
   text-align: left;
 }
@@ -519,11 +672,27 @@ h1 .term {
   color: var(--bg);
 }
 .hname,
-.name {
+.name .who {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.name { /* the name (cut if too long) and its label */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tag.real { /* a real name among the synthetic ones: its real people */
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--amber);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--amber);
+  text-shadow: 0 0 6px rgba(255, 181, 71, 0.5);
 }
 .meter {
   display: block;
@@ -547,16 +716,13 @@ body.synthetic .meter { /* the synthetic people: an outline, a trace that is com
 }
 .tip,
 .value {
-  font-size: 14px;
+  font-size: 16px;
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: var(--phos);
 }
 
 /* the number of the view, above the panels; then the names, as the countries */
-.people {
-  padding: 12px;
-}
 .results {
   margin: 0;
   padding: 0;
@@ -565,32 +731,49 @@ body.synthetic .meter { /* the synthetic people: an outline, a trace that is com
 .results li:hover {
   background: rgba(0, 255, 229, 0.06);
 }
-.tag {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 5px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  vertical-align: 0.1em;
-}
-.you {
-  border: 1px solid var(--amber);
+.results li.you .name { /* your own name: amber */
   color: var(--amber);
-  text-shadow: 0 0 6px rgba(255, 181, 71, 0.6);
+  text-shadow: 0 0 6px rgba(255, 181, 71, 0.55);
+}
+.results li.you .meter {
+  background: var(--amber);
+  border-color: var(--amber);
+  box-shadow: 0 0 6px rgba(255, 181, 71, 0.6);
 }
 #more {
   margin: 12px 8px 4px;
 }
 @media (max-width: 640px) {
+  .entry {
+    left: 0;
+    width: 100%;
+    padding: 12px 14px 14px;
+  }
+  .entry dfn {
+    font-size: 26px;
+  }
+  .entry .sense {
+    font-size: 17px;
+  }
+  .entry .example {
+    font-size: 18px;
+  }
   .dial {
     flex-direction: column;
   }
-  .switch {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
+}
+
+/* the banner of the author, at the end of the page */
+.credit {
+  padding: 0 var(--gutter) 10px;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.credit a {
+  color: var(--phos);
 }
 
 /* how it works: made to be read (the text in a sans serif font) */
@@ -758,6 +941,10 @@ details p {
   button {
     min-height: 44px;
   }
+  .clear {
+    width: 44px;
+    height: 44px;
+  }
   .how a,
   summary {
     display: inline-block;
@@ -769,7 +956,7 @@ details p {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .switch-knob {
+  .key {
     transition: none;
   }
 }

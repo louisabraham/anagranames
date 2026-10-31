@@ -353,9 +353,10 @@ class Model:
         l = [np.tile(np.arange(c, d), b - a) for a, b, c, d in blocks]
         return (np.concatenate(f), np.concatenate(l)) if blocks else (np.zeros(0, np.int64),) * 2
 
-    def search(self, query, country=None, limit=20):
+    def search(self, query, country=None, limit=20, by_model=False):
         """The anagram names of the query: the real full names first (most people first), then the most probable.
-        With a country of a pack of several countries: the anagrams of the names seen in it, its people."""
+        With a country of a pack of several countries: the anagrams of the names seen in it, its real people, and
+        its synthetic names: no real person anywhere in the pack. by_model: all the names, the most probable first."""
         f, l = self.anagrams(query)
         if country is None and len(self.countries) == 1:
             country = self.countries[0]
@@ -369,7 +370,10 @@ class Model:
             lp, best = self.log_p(f, l, c)[:, 0], np.full(len(f), c)
         c = None if len(self.countries) == 1 else c  # one country: all the people of the pack
         real = self.real(f, l, c)
-        top = np.lexsort((l, f, -lp, -real))[:limit]
+        if c is not None:  # a country of the world: a synthetic name has no real person anywhere
+            keep = (real > 0) | (self.real(f, l, None) == 0)
+            f, l, real, lp, best = f[keep], l[keep], real[keep], lp[keep], best[keep]
+        top = (np.lexsort((l, f, -lp)) if by_model else np.lexsort((l, f, -lp, -real)))[:limit]
         results = [{"first": self.first.names[f[i]], "last": self.last.names[l[i]],
                     "country": self.countries[best[i]], "log_p": float(lp[i]), "real": int(real[i]),
                     "first_people": int(self.first.total[f[i]]), "first_countries": self.name_countries("first", f[i], c),

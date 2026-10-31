@@ -51,13 +51,9 @@ export class Globe {
     this.lines = graticule();
     this.raf = 0;
     this.last = 0;
-    this.visible = true;
     box.globe = this; // for the tests
     new ResizeObserver(() => this.resize()).observe(box);
-    new IntersectionObserver(([e]) => {
-      this.visible = e.isIntersecting;
-      if (this.visible) this.wake();
-    }).observe(box);
+    new IntersectionObserver(([e]) => e.isIntersecting && this.wake()).observe(box); // back on the screen: frames again
     this.listen();
     this.resize();
   }
@@ -146,6 +142,7 @@ export class Globe {
     this.canvas.height = Math.round(h * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     Object.assign(this, { w, h, cx: w / 2, cy: h / 2, R: Math.max(40, Math.min(w, h) / 2 - 18) });
+    if (w && h && this.box.offsetParent) this.draw(performance.now()); // a new size clears the canvas: draw it now
     this.wake();
   }
 
@@ -293,19 +290,6 @@ export class Globe {
       this.tip.hidden = true;
       return;
     }
-    const { ctx } = this, [x, y] = at, dir = x < this.cx ? -1 : 1, rise = Math.min(34, y - 24);
-    const bend = [x + dir * 26, y - rise], end = [bend[0] + dir * 46, y - rise];
-    ctx.strokeStyle = "rgba(235, 255, 252, 0.95)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(...bend);
-    ctx.lineTo(...end);
-    ctx.stroke();
-    ctx.fillStyle = "rgba(235, 255, 252, 1)";
-    ctx.beginPath();
-    ctx.arc(x, y, 3, 0, 2 * Math.PI);
-    ctx.fill();
     const key = `${c.code}|${c.name}|${JSON.stringify(info)}`;
     if (this.tip.dataset.key !== key) {
       const title = document.createElement("b");
@@ -317,15 +301,32 @@ export class Globe {
           Object.assign(document.createElement("span"), { textContent: value }));
         return row;
       });
-      const hint = Object.assign(document.createElement("span"), { className: "hint", textContent: info.hint ?? "" });
-      this.tip.replaceChildren(title, ...rows, ...(info.hint ? [hint] : []));
+      this.tip.replaceChildren(title, ...rows);
       this.tip.dataset.key = key;
     }
     this.tip.hidden = false;
-    const tw = this.tip.offsetWidth, th = this.tip.offsetHeight;
-    const left = dir > 0 ? end[0] : end[0] - tw;
-    this.tip.style.left = `${Math.max(4, Math.min(this.w - tw - 4, left))}px`;
-    this.tip.style.top = `${Math.max(4, Math.min(this.h - th - 4, end[1] - th / 2))}px`;
+    const tw = this.tip.offsetWidth, th = this.tip.offsetHeight, { w, h, ctx } = this;
+    // the country on the screen (its points on this side, traced in this frame): the box goes above it, else below
+    let top = Infinity, bottom = -Infinity;
+    for (const r of c.rings) for (let i = 0; i < r.sz.length; i++) if (r.sz[i] > 0) [top, bottom] = [Math.min(top, r.sy[i]), Math.max(bottom, r.sy[i])];
+    const [x, y] = at, gap = 14, above = top - gap - th, below = bottom + gap;
+    const tipTop = above >= 4 ? above : below + th <= h - 4 ? below : top > h - bottom ? Math.max(4, above) : Math.min(h - th - 4, below);
+    const mid = tipTop + th / 2, dir = x < this.cx ? 1 : -1; // the box toward the middle of the globe: room for it
+    const elbow = [x + dir * Math.min(36, Math.abs(y - mid)), mid];
+    const left = Math.max(4, Math.min(w - tw - 4, dir > 0 ? elbow[0] + 22 : elbow[0] - 22 - tw));
+    ctx.strokeStyle = "rgba(235, 255, 252, 0.95)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(...elbow);
+    ctx.lineTo(dir > 0 ? left : left + tw, mid);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(235, 255, 252, 1)";
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, 2 * Math.PI);
+    ctx.fill();
+    this.tip.style.left = `${left}px`;
+    this.tip.style.top = `${tipTop}px`;
   }
 
   // ---------- motion ----------
@@ -335,7 +336,8 @@ export class Globe {
 
   frame(now) {
     this.raf = 0;
-    if (!this.visible || !this.box.offsetParent) return; // not on the screen: no frames
+    const r = this.box.getBoundingClientRect(); // not on the screen: no frames (measured: always up to date)
+    if (!this.box.offsetParent || r.bottom <= 0 || r.top >= innerHeight) return;
     if (this.w !== this.box.clientWidth || this.h !== this.box.clientHeight) this.resize(); // it was hidden: no size
     const dt = Math.min(64, now - (this.last || now));
     this.last = now;
@@ -407,8 +409,9 @@ export class Globe {
       if (!d) return;
       if (d.moved) this.spin = performance.now() - d.t < 80 ? this.velocity ?? 0 : 0;
       else if (click) {
-        const hit = at(e);
+        const where = this.toEarth(...point(e)), hit = this.countryAt(where);
         if (hit?.code && this.values.has(hit.code)) this.pick(hit.code);
+        else if (where && this.chosen) this.pick(null); // the sphere outside a country of the data: no country chosen
         if (d.touch) this.hover = hit; // a finger: the box of the country too
       }
       this.wake();

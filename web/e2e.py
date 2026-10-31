@@ -2,9 +2,10 @@
 # the page with app/anagram.py (the Python version of the search) on the same pack and query, and fails on page
 # errors, console errors and failed requests.
 # Run: node web/build.mjs, then
-#   uv run --no-project --with playwright --with numpy python web/e2e.py [--browser chromium webkit] [--headed]
-#     [--devices "iPhone SE" "Pixel 7"] [-k globe]
-# Without --devices, the phone and tablet tests run on the profiles of MOBILE; with "--devices" alone, not at all.
+#   uv run --no-project --with playwright --with numpy python web/e2e.py [-k globe,keys] [--all] [-j 6]
+# By default: Chromium only, no phones (while working, with -k: the tests of the change). --all, before a commit: the 3
+# browsers and the phone and tablet profiles of MOBILE. --browser and --devices choose them one by one. The tests run in
+# parallel processes (-j).
 # The first time: uv run --no-project --with playwright playwright install chromium-headless-shell webkit firefox
 import argparse
 import http.server
@@ -16,6 +17,7 @@ import tempfile
 import threading
 import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from urllib.parse import quote_plus
 
@@ -61,10 +63,11 @@ def close(text, want):
     return abs(float(text.replace(",", "")) - want) <= 0.06 * want + 0.006
 
 
-def expected(source, query, limit=50):
-    """The search of app/anagram.py in a source: world, FR-insee or a country code (in the world pack)."""
+def expected(source, query, limit=50, by_model=False):
+    """The search of app/anagram.py in a source: world, FR-insee or a country code (in the world pack); by_model: all
+    the names, the most probable first."""
     pack = source if source in ("world", "FR-insee") else "world"
-    return model(pack).search(query, None if pack == source else source, limit)
+    return model(pack).search(query, None if pack == source else source, limit, by_model)
 
 
 class Server(http.server.ThreadingHTTPServer):
@@ -89,12 +92,29 @@ def wait_status(page, text):
         raise AssertionError(f"status is {page.text_content('#status')!r} after {WAIT // 1000} s, expected {text!r}")
 
 
+def check_message(page, query, synthetic):
+    """The message at the top of the globe: about the world (whatever the country chosen or with the focus), the real
+    names; with the synthetic names, the names generated too."""
+    w = expected("world", query, 0)
+    rn, z = w["real_names"], w["found"] - w["real_names"]
+    real = f"{n(rn)} anagraname{'s have' if rn > 1 else ' has'} Facebook accounts" if rn else "No anagraname has Facebook accounts"
+    gen = f"{n(z)} synthetic anagraname{'s' if z > 1 else ''} generated" if z else "No synthetic anagraname generated"
+    want = [real, gen] if synthetic else [real]
+    try:
+        page.wait_for_function("w => JSON.stringify([...document.querySelectorAll('#tally p')].map((p) => p.textContent)) === w",
+                               arg=json.dumps(want, separators=(",", ":"), ensure_ascii=False), timeout=WAIT)
+    except PlaywrightTimeout:
+        lines = page.eval_on_selector_all("#tally p", "ps => ps.map((p) => p.textContent)")
+        raise AssertionError(f"message {lines}, expected {want}")
+
+
 def check_list(page, source, query, synthetic=False, limit=50):
     """The page shows the people of app/anagram.py for the query: the real people (most people first, with their
-    people), or the synthetic people (most probable first). Returns these results of app/anagram.py."""
+    people), or with the synthetic people all the names (most probable first, the people that the model expects with
+    them, and a label of its real people on a real name). Returns these results of app/anagram.py."""
     real_names = expected(source, query, 0)["real_names"]
-    res = expected(source, query, real_names + limit)
-    want = [r for r in res["results"] if bool(r["real"]) != synthetic][:limit]
+    res = expected(source, query, limit, by_model=True) if synthetic else expected(source, query, real_names + limit)
+    want = res["results"][:limit] if synthetic else [r for r in res["results"] if r["real"]][:limit]
     mode = "synthetic" if synthetic else "real"
     try:
         page.wait_for_function("([k, m]) => { const h = document.getElementById('headline'); return h.dataset.key === k && h.dataset.mode === m; }",
@@ -106,23 +126,26 @@ def check_list(page, source, query, synthetic=False, limit=50):
     if not synthetic and res["real_people"]:
         label = f"{n(res['real_people'])} real {'person' if res['real_people'] == 1 else 'people'}"
         assert label in headline, f"headline {headline!r}, expected {label}"
+    check_message(page, query, synthetic)
     pop = population(source)
-    if synthetic and res["found"] - res["real_names"] and res["found"] < 60_000:  # all the names: their people expected
+    if synthetic and res["found"] and res["found"] < 60_000:  # all the names: their people expected
         everyone = expected(source, query, res["found"])["results"]
-        total = pop * sum(math.exp(r["log_p"]) for r in everyone if not r["real"])
-        shown = page.text_content("#headline .big").split(" synthetic")[0]
-        assert close(shown, total), f"headline {headline!r}, expected about {total:.3g} synthetic people"
+        total = pop * sum(math.exp(r["log_p"]) for r in everyone)
+        shown = page.text_content("#headline .big").split(" people")[0]
+        assert close(shown, total), f"headline {headline!r}, expected about {total:.3g} people"
     shown = page.eval_on_selector_all("#results li", """lis => lis.map((li) => ({
         name: li.querySelector('.first').textContent + ' ' + li.querySelector('.last').textContent,
-        value: li.querySelector('.value').textContent}))""")
+        value: li.querySelector('.value').textContent, tag: li.querySelector('.tag.real')?.textContent ?? ''}))""")
     assert len(shown) == len(want), f"{len(shown)} people shown, expected {len(want)}"
     for i, (row, r) in enumerate(zip(shown, want), 1):
         assert row["name"] == f"{r['first']} {r['last']}", f"{i}: {row['name']!r}, expected {r['first']} {r['last']}"
-        if r["real"]:
+        if not synthetic:
             assert row["value"] == n(r["real"]), f"{i} ({row['name']}): {row['value']}, expected {n(r['real'])}"
-        else:
-            x = pop * math.exp(r["log_p"])
-            assert close(row["value"], x), f"{i} ({row['name']}): {row['value']}, expected about {x:.3g} people"
+            continue
+        x = pop * math.exp(r["log_p"])
+        assert close(row["value"], x), f"{i} ({row['name']}): {row['value']}, expected about {x:.3g} people"
+        label = f"{n(r['real'])} real" if r["real"] else ""
+        assert row["tag"] == label, f"{i} ({row['name']}): label {row['tag']!r}, expected {label!r}"
     return want
 
 
@@ -187,7 +210,7 @@ def test_switch(page, base):
     page.click("#synthetic")
     check_list(page, "world", q, synthetic=True)
     assert page.get_attribute("#synthetic", "aria-checked") == "true"
-    assert page.text_content("#names") == n(res["found"] - res["real_names"]), f"names: {page.text_content('#names')}"
+    assert page.text_content("#names") == n(res["found"]), f"names: {page.text_content('#names')}"
     page.wait_for_function("document.getElementById('hist').dataset.mode === 'synthetic'", timeout=WAIT)
     page.go_back()
     check_list(page, "world", q)
@@ -196,14 +219,13 @@ def test_switch(page, base):
 
 
 def test_country(page, base):
-    """A country of the world by its address; its button gives the world again."""
+    """A country of the world by its address, chosen in the list; a click on it gives the world again."""
     start(page, base, "Marie Inuzuka", "JP")
     check_list(page, "JP", "Marie Inuzuka")
-    page.wait_for_selector("#to-world", timeout=WAIT)
-    assert page.text_content("#to-world") == "Japan ×", page.text_content("#to-world")
-    page.click("#to-world")
+    page.wait_for_function("document.querySelector('#hist .hbar.chosen')?.dataset.country === 'JP'", timeout=WAIT)
+    page.click("#hist .hbar.chosen")  # the chosen country again: the world
     check_list(page, "world", "Marie Inuzuka")
-    assert page.locator("#to-world").count() == 0, "the button of the country stays"
+    assert page.locator("#hist .hbar.chosen").count() == 0, "a country stays chosen"
 
 
 def test_insee(page, base):
@@ -215,14 +237,17 @@ def test_insee(page, base):
 
 
 def test_country_in_world(page, base):
-    """A name of a country is in the world too: the list shows it as your name (in the list of its kind)."""
-    q = "Marie Inuzuka"
+    """A real name of a country is real in the world too: both lists show it as your name. A name real elsewhere
+    only is in no list of the country (Marie Inuzuka: not real in Japan, not synthetic either)."""
+    q = "Yuki Tanaka"
+    jp = expected("JP", "Marie Inuzuka", 10_000)["results"]
+    assert not [r for r in jp if f"{r['first']} {r['last']}" == "Marie Inuzuka"], "Marie Inuzuka in a list of Japan"
     for pack in ("JP", "world"):
         res = expected(pack, q, 10_000)["results"]
         mine = next(r for r in res if f"{r['first']} {r['last']}" == q)
         start(page, base, q, pack, synthetic=not mine["real"])
         check_list(page, pack, q, synthetic=not mine["real"])
-        tags = page.eval_on_selector_all("#results .tag.you", "ts => ts.length")
+        tags = page.eval_on_selector_all("#results li.you", "ts => ts.length")
         assert tags == 1, f"{pack}: the query is not in the list"
 
 
@@ -237,21 +262,24 @@ def test_capitals(page, base):
 
 
 def test_you(page, base):
-    """The tag "you" is on the query only: Louis Abraham, not Louisa Braham (its letters in the same order)."""
+    """Your name has its own color, on the query only: Louis Abraham, not Louisa Braham (its letters in the same
+    order)."""
     start(page, base, "Louis Abraham", synthetic=True)
     check_list(page, "world", "Louis Abraham", synthetic=True)
     page.click("#synthetic")
     check_list(page, "world", "Louis Abraham")
     page.locator("#more").scroll_into_view_if_needed()
     page.wait_for_function("document.querySelectorAll('#results li').length === 85", timeout=WAIT)
-    tags = page.eval_on_selector_all(".tag.you", "ts => ts.map((t) => t.closest('li').querySelector('.first').textContent + ' ' + t.closest('li').querySelector('.last').textContent)")
-    assert tags == ["Louis Abraham"], f"the tag is on {tags}"
+    tags = page.eval_on_selector_all("#results li.you", "ls => ls.map((l) => l.querySelector('.first').textContent + ' ' + l.querySelector('.last').textContent)")
+    assert tags == ["Louis Abraham"], f"the color of your name is on {tags}"
+    colors = page.evaluate("""[...document.querySelectorAll('#results li')].slice(0, 3).map((l) => getComputedStyle(l.querySelector('.name')).color)""")
+    assert len(set(colors)) == 2, f"your name has the color of the others: {colors}"
 
 
 def test_histogram(page, base):
     """The list of the countries, with the numbers of app/anagram.py: the real people per country, then the synthetic
     people expected per country (as in the view of the country: the population of the country times the probability
-    of each name). A click on a country shows its people, and the button of the country the world again."""
+    of each name). A click on a country shows its people, and a click on it again the world."""
     q = "Yuki Tanaka"
     start(page, base, q)
     check_list(page, "world", q)
@@ -267,16 +295,167 @@ def test_histogram(page, base):
     page.click("#hist .hbar[data-country='JP']")
     check_list(page, "JP", q)
     page.wait_for_function("document.querySelector('#hist .hbar.chosen')?.dataset.country === 'JP'", timeout=WAIT)
-    page.click("#to-world")
+    page.click("#hist .hbar.chosen")
     check_list(page, "world", q)
     assert page.locator(".hbar.chosen").count() == 0, "a country stays chosen"
     page.click("#synthetic")
     check_list(page, "world", q, synthetic=True)
     page.wait_for_function("document.getElementById('hist').dataset.mode === 'synthetic'", timeout=WAIT)
-    for c, text in bars(page)[:3]:  # the people expected with the synthetic names of the country
+    for c, text in bars(page)[:3]:  # the people expected with all the names of the view of the country
         res = expected(c, q, expected(c, q, 0)["found"])["results"]
-        want = population(c) * sum(math.exp(r["log_p"]) for r in res if not r["real"])
+        want = population(c) * sum(math.exp(r["log_p"]) for r in res)
         assert close(text, want), f"{c}: {text}, expected about {want:.3g} people"
+
+
+def test_synthetic_nowhere_real(page, base):
+    """A synthetic person has a name that nobody in the data has, in any country: Daniel Huynh (23 real people, none
+    in South Korea) is not a synthetic person of South Korea."""
+    start(page, base, "Daniel Huynh", "KR", synthetic=True)
+    check_list(page, "KR", "Daniel Huynh", synthetic=True)
+    names = page.eval_on_selector_all("#results li", "ls => ls.map((l) => l.querySelector('.first').textContent + ' ' + l.querySelector('.last').textContent)")
+    assert "Daniel Huynh" not in names, f"a real name in the synthetic people of South Korea: {names[:5]}"
+
+
+def test_real_among_synthetic(page, base):
+    """With the synthetic people, the real names are in the list too, at their place for the model, with a label of
+    their real people: Yuki Tanaka (41 real people)."""
+    start(page, base, "Yuki Tanaka", synthetic=True)
+    rows = check_list(page, "world", "Yuki Tanaka", synthetic=True)
+    assert any(r["real"] for r in rows) and any(not r["real"] for r in rows), "no real and synthetic names together"
+    page.wait_for_function("document.querySelector('#results li.you .tag.real')", timeout=WAIT)
+    assert page.text_content("#results li.you .tag.real") == "41 real", page.text_content("#results li.you .tag.real")
+
+
+def test_names_whole(page, base):
+    """The names of people are whole (not cut), with their labels: the bars give the room. On a computer, in both
+    kinds of people (Louis Abraham). The countries keep a fixed part for their names (a long one is cut)."""
+    for synthetic in (False, True):
+        start(page, base, "Louis Abraham", synthetic=synthetic)
+        check_list(page, "world", "Louis Abraham", synthetic=synthetic)
+        wait_hist(page)
+        cut = page.evaluate("""[...document.querySelectorAll('#results .who')]
+            .filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent)""")
+        assert not cut, f"cut names{' (synthetic)' if synthetic else ''}: {cut[:5]}"
+
+
+def test_keyboard(page, base):
+    """The arrows in the lists, without Tab (no row in the order of Tab): Arrow Down in the field goes to the countries;
+    with the world, up and down only move; Enter chooses the country, then up and down choose the next one at once;
+    Space gives the world again (the arrows only move again); right and left go from a list to the other; End to the
+    last name (the next names load, the focus stays)."""
+    q = "Yuki Tanaka"
+    start(page, base, q, synthetic=True)
+    check_list(page, "world", q, synthetic=True)
+    wait_hist(page)
+    stops = page.evaluate("[...document.querySelectorAll('.hbar, #results li')].filter((r) => r.tabIndex >= 0).length")
+    assert stops == 0, f"{stops} rows in the order of Tab"
+    countries = page.eval_on_selector_all("#hist .hbar", "bs => bs.map((b) => b.dataset.country)")
+    focus = "c => document.activeElement?.dataset?.country === c"
+
+    def none_chosen(label):
+        page.wait_for_timeout(400)
+        assert page.locator("#hist .hbar.chosen").count() == 0, f"{label}: a country is chosen"
+
+    page.focus("#q")
+    page.keyboard.press("ArrowDown")
+    page.wait_for_function(focus, arg=countries[0], timeout=WAIT)
+    page.keyboard.press("ArrowDown")
+    page.wait_for_function(focus, arg=countries[1], timeout=WAIT)
+    none_chosen("the world, Arrow Down")
+    check_message(page, q, True)  # a country with the focus: the message of the world
+    page.keyboard.press("Enter")
+    check_list(page, countries[1], q, synthetic=True)
+    page.wait_for_function(focus, arg=countries[1], timeout=WAIT)
+    page.keyboard.press("ArrowDown")
+    check_list(page, countries[2], q, synthetic=True)
+    page.wait_for_function(focus, arg=countries[2], timeout=WAIT)
+    page.keyboard.press("Space")
+    check_list(page, "world", q, synthetic=True)
+    page.wait_for_function(focus, arg=countries[2], timeout=WAIT)
+    page.keyboard.press("ArrowDown")
+    page.wait_for_function(focus, arg=countries[3], timeout=WAIT)
+    none_chosen("the world again, Arrow Down")
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("ArrowDown")
+    index = page.evaluate("[...document.querySelectorAll('#results li')].indexOf(document.activeElement)")
+    assert index == 2, f"the focus is on the name {index}, expected 2"
+    page.keyboard.press("ArrowLeft")
+    page.wait_for_function(focus, arg=countries[3], timeout=WAIT)
+    page.keyboard.press("Escape")  # no focus: the message of the view
+    page.go_back()  # before Space: the country of the arrows
+    check_list(page, countries[2], q, synthetic=True)
+    page.go_back()  # before Enter: the world
+    check_list(page, "world", q, synthetic=True)
+    page.click("#results li >> nth=0")
+    page.keyboard.press("End")
+    page.wait_for_function("document.querySelectorAll('#results li').length > 50", timeout=WAIT)
+    page.wait_for_timeout(300)
+    assert page.evaluate("document.activeElement.closest('#results') !== null"), "the focus leaves the list when the next names load"
+
+
+def test_keys(page, base):
+    """The key S: the switch, but not in the field (a letter of a name); Enter and Escape: the field lets the focus go;
+    then the arrows go to the lists (down: the countries, right: the names, also after a click on the globe); Escape: a
+    country lets the focus go, and a chosen country gives the world again."""
+    q = "Yuki Tanaka"
+    start(page, base)
+    page.focus("#q")
+    page.keyboard.type(q)
+    check_list(page, "world", q)
+    page.keyboard.press("Enter")
+    assert page.evaluate("document.activeElement.id") != "q", "Enter: the field keeps the focus"
+    page.keyboard.press("s")
+    check_list(page, "world", q, synthetic=True)
+    page.keyboard.press("S")
+    check_list(page, "world", q)
+    page.focus("#q")
+    page.keyboard.press("End")
+    page.keyboard.type("s")  # a letter of the name: no switch
+    page.wait_for_timeout(400)
+    assert page.get_attribute("#synthetic", "aria-checked") == "false", "S in the field turns the switch"
+    page.keyboard.press("Backspace")
+    page.keyboard.press("Escape")
+    assert page.evaluate("document.activeElement.id") != "q", "Escape: the field keeps the focus"
+    check_list(page, "world", q)
+    wait_hist(page)
+    first = page.get_attribute("#hist .hbar >> nth=0", "data-country")
+    page.keyboard.press("ArrowDown")  # out of the field: the arrows go to the countries
+    page.wait_for_function("c => document.activeElement?.dataset?.country === c", arg=first, timeout=WAIT)
+    page.keyboard.press("Escape")  # a country lets the focus go
+    assert page.evaluate("document.activeElement === document.body"), "Escape: the country keeps the focus"
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Enter")  # a country chosen, then Escape: the world again, and no focus
+    check_list(page, first, q)
+    page.keyboard.press("Escape")
+    check_list(page, "world", q)
+    assert page.evaluate("document.activeElement === document.body"), "Escape: the chosen country keeps the focus"
+    box = page.locator("#globe canvas").bounding_box()
+    page.mouse.click(box["x"] + 6, box["y"] + 6)  # a click on the globe (out of the sphere), then the arrows
+    page.keyboard.press("ArrowRight")
+    assert page.evaluate("document.activeElement.closest('#results') !== null"), "Arrow Right after a click on the globe: not the names"
+
+
+def test_switch_country(page, base):
+    """The switch with a chosen country: a country with people of both kinds stays chosen; a country without people
+    of the new kind is not chosen any more (the world again). Yuki Tanaka: Japan has both, Afghanistan synthetic
+    people only."""
+    q = "Yuki Tanaka"
+    start(page, base, q, "JP", synthetic=True)
+    check_list(page, "JP", q, synthetic=True)
+    wait_hist(page)
+    page.click("#synthetic")
+    check_list(page, "JP", q)
+    page.wait_for_function("document.querySelector('#hist .hbar.chosen')?.dataset.country === 'JP'", timeout=WAIT)
+    start(page, base, q, "AF", synthetic=True)
+    check_list(page, "AF", q, synthetic=True)
+    wait_hist(page)
+    page.click("#synthetic")
+    check_list(page, "world", q)
+    page.wait_for_function("document.getElementById('hist').dataset.mode === 'real'", timeout=WAIT)
+    assert page.locator("#hist .hbar.chosen").count() == 0, "a country without real people stays chosen"
+    page.go_back()  # the back button: Afghanistan and its synthetic people again
+    check_list(page, "AF", q, synthetic=True)
 
 
 def test_rows(page, base):
@@ -305,10 +484,97 @@ def test_rows(page, base):
     assert "Hong Kong" in names and not [x for x in names if "SAR" in x], f"names: {[x for x in names if 'Hong' in x or 'SAR' in x]}"
 
 
+def test_headers_stay(page, base):
+    """The headers of the two lists stay in place while their lists scroll; the scroll bars: a line and a rectangle."""
+    start(page, base, "Yuki Tanaka", synthetic=True)
+    check_list(page, "world", "Yuki Tanaka", synthetic=True)
+    wait_hist(page)
+    for box in ("#hist", "#people"):
+        head = page.locator(f"{box} .pane-head").bounding_box()
+        page.evaluate(f"document.querySelector('{box} .pane-body').scrollTop = 300")
+        page.wait_for_timeout(200)
+        moved = page.evaluate(f"document.querySelector('{box} .pane-body').scrollTop")
+        assert moved > 0, f"{box}: the list does not scroll"
+        after = page.locator(f"{box} .pane-head").bounding_box()
+        assert abs(after["y"] - head["y"]) < 1, f"{box}: the header moves with the list ({head['y']} -> {after['y']})"
+    # the scroll bar of the page: a line and a rectangle; the bar of the browser hidden; the rectangle follows the list,
+    # and a drag of it scrolls the list
+    for box in ("#hist", "#people"):
+        state = page.evaluate(f"""(() => {{ const b = document.querySelector('{box} .pane-body'), t = document.querySelector('{box} .sthumb');
+            return [b.offsetWidth - b.clientWidth, !t.closest('.sbar').hidden, t.getBoundingClientRect().top - t.closest('.sbar').getBoundingClientRect().top]; }})()""")
+        assert state[0] == 0, f"{box}: the scroll bar of the browser shows ({state[0]} px)"
+        assert state[1] and state[2] > 1, f"{box}: the rectangle of the scroll bar does not follow the list: {state}"
+        page.evaluate(f"document.querySelector('{box} .pane-body').scrollTop = 0")
+        thumb = page.locator(f"{box} .sthumb").bounding_box()
+        page.mouse.move(thumb["x"] + thumb["width"] / 2, thumb["y"] + 5)
+        page.mouse.down()
+        page.mouse.move(thumb["x"] + thumb["width"] / 2, thumb["y"] + 105, steps=5)
+        page.mouse.up()
+        moved = page.evaluate(f"document.querySelector('{box} .pane-body').scrollTop")
+        assert moved > 100, f"{box}: a drag of the rectangle scrolls the list {moved} px"
+    widths = page.evaluate("['#hist', '#people'].map((q) => Math.round(document.querySelector(q).getBoundingClientRect().width))")
+    assert abs(widths[0] - widths[1]) <= 1, f"the two lists are {widths} px wide"
+
+
+def test_clear(page, base):
+    """The cross in the field clears the name: no people, the field empty and ready to type."""
+    start(page, base, "Yuki Tanaka")
+    check_list(page, "world", "Yuki Tanaka")
+    page.click("#clear")
+    page.wait_for_function("document.getElementById('view').hidden", timeout=WAIT)
+    assert page.input_value("#q") == "" and page.locator("#clear").is_hidden(), "the field is not cleared"
+    assert page.evaluate("document.activeElement.id") == "q", "the field does not take the focus"
+    page.keyboard.type("Yuki Tanaka")
+    check_list(page, "world", "Yuki Tanaka")
+
+
+def test_definition(page, base):
+    """The definition of the word: hidden, then open while the mouse is over the word, closed when it leaves; a click
+    keeps it open, Escape closes it."""
+    start(page, base, "Arsene Lupin")
+    check_list(page, "world", "Arsene Lupin")
+    assert page.locator("#entry").is_hidden(), "the definition shows before a hover"
+    page.hover("#term")
+    page.wait_for_selector("#entry", state="visible", timeout=WAIT)
+    assert "neologism" in page.text_content("#entry") and "Paul Sernine" in page.text_content("#entry")
+    page.mouse.move(2, page.viewport_size["height"] - 2)
+    page.wait_for_selector("#entry", state="hidden", timeout=WAIT)
+    page.click("#term")
+    page.mouse.move(2, page.viewport_size["height"] - 2)
+    page.wait_for_timeout(400)
+    assert page.locator("#entry").is_visible(), "a click does not keep the definition open"
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#entry", state="hidden", timeout=WAIT)
+
+
+def test_fits_the_window(page, base):
+    """On a computer, the page is the height of the window and no more (no scroll of the page), with the real or the
+    synthetic people, and with a country."""
+    start(page, base, "Arsene Lupin")
+    check_list(page, "world", "Arsene Lupin")
+    for w, h in [(1280, 650), (1280, 720), (1440, 900), (1920, 1080)]:
+        page.set_viewport_size({"width": w, "height": h})
+        for step in ("real", "synthetic", "country"):
+            if step == "synthetic":
+                page.click("#synthetic")
+                check_list(page, "world", "Arsene Lupin", synthetic=True)
+            if step == "country":
+                page.click("#hist .hbar >> nth=1")
+                page.wait_for_function("document.querySelector('#hist .hbar.chosen')", timeout=WAIT)
+            page.wait_for_timeout(200)
+            size = page.evaluate("[document.scrollingElement.scrollHeight, innerHeight]")
+            assert size[0] <= size[1], f"{w}x{h}, {step}: the page is {size[0]} px high in a window of {size[1]} px"
+        page.click("#synthetic")  # back to the real people, in the world
+        page.wait_for_function("document.getElementById('headline').dataset.mode === 'real'", timeout=WAIT)
+        if page.locator("#hist .hbar.chosen").count():
+            page.click("#hist .hbar.chosen")
+        page.wait_for_function("!document.querySelector('#hist .hbar.chosen')", timeout=WAIT)
+
+
 def test_globe(page, base):
     """The globe: a country chosen in the list of the countries is chosen on the globe, its box has the numbers of
     app/anagram.py; the pointer on a country shows its box; a click on a country of the globe chooses it, a click on
-    it again the world; a drag turns the globe (the earth follows the pointer). A screenshot, path in the output."""
+    it again the world, a click on the sea the world too; a drag turns the globe (the earth follows the pointer). A screenshot, path in the output."""
     q = "Yuki Tanaka"
     page.emulate_media(reduced_motion="reduce")  # still: the places on the screen do not move
     start(page, base, q)
@@ -326,7 +592,7 @@ def test_globe(page, base):
     page.wait_for_function("document.getElementById('globe').dataset.chosen === 'JP'", timeout=WAIT)
     page.wait_for_timeout(300)
     tip = page.text_content(".globe-tip")
-    for want in ("Japan", "Real people", n(expected("JP", q, 0)["real_people"]), "Synthetic, expected"):
+    for want in ("Japan", "Real people", n(expected("JP", q, 0)["real_people"]), "Expected, model"):
         assert want in tip, f"the box of Japan {tip!r} lacks {want}"
 
     def place(code):
@@ -339,6 +605,9 @@ def test_globe(page, base):
     page.mouse.move(*place("CN"))
     page.wait_for_function("document.getElementById('globe').dataset.hover === 'CN'", timeout=WAIT)
     page.wait_for_function("document.querySelector('.globe-tip').textContent.includes('China')", timeout=WAIT)
+    dot = page.evaluate("document.getElementById('globe').globe.where('CN')")
+    tip = page.evaluate("(() => { const t = document.querySelector('.globe-tip'); return [t.offsetLeft, t.offsetTop, t.offsetWidth, t.offsetHeight]; })()")
+    assert not (tip[0] <= dot["x"] <= tip[0] + tip[2] and tip[1] <= dot["y"] <= tip[1] + tip[3]), f"the box {tip} covers the country {dot}"
     path = f"{SHOTS}/{page.context.browser.browser_type.name}-globe.png"
     page.locator("#globe").screenshot(path=path)
     page.mouse.click(*place("CN"))
@@ -346,6 +615,19 @@ def test_globe(page, base):
     page.wait_for_function("document.getElementById('globe').dataset.chosen === 'CN'", timeout=WAIT)
     page.wait_for_timeout(300)
     page.mouse.click(*place("CN"))
+    check_list(page, "world", q)
+    page.mouse.click(*place("CN"))  # China again; then a click on the sea: the world
+    check_list(page, "CN", q)
+    page.wait_for_function("document.getElementById('globe').dataset.chosen === 'CN'", timeout=WAIT)
+    page.wait_for_timeout(300)
+    page.evaluate("document.getElementById('globe').scrollIntoView({ block: 'center' })")
+    canvas = page.locator("#globe canvas").bounding_box()
+    sea = page.evaluate("""(() => { const g = document.getElementById('globe').globe;
+        for (let k = 0; k < 400; k++) { const a = k * 2.4, r = g.R * Math.sqrt((k + 0.5) / 400) * 0.95;
+            const x = g.cx + r * Math.cos(a), y = g.cy + r * Math.sin(a);
+            if (!g.countryAt(g.toEarth(x, y))) return { x, y }; } return null; })()""")
+    assert sea, "no sea on the globe"
+    page.mouse.click(canvas["x"] + sea["x"], canvas["y"] + sea["y"])
     check_list(page, "world", q)
     page.evaluate("document.getElementById('globe').scrollIntoView({ block: 'center' })")
     canvas = page.locator("#globe canvas").bounding_box()
@@ -405,7 +687,10 @@ def test_globe_resize(page, base):
         where = page.evaluate("document.getElementById('globe').globe.where('FR') || document.getElementById('globe').globe.where('DE')")
         if where:
             page.mouse.move(box["x"] + where["x"], box["y"] + where["y"])
-            page.wait_for_function("!document.querySelector('.globe-tip').hidden", timeout=WAIT)
+            try:
+                page.wait_for_function("!document.querySelector('.globe-tip').hidden", timeout=WAIT)
+            except PlaywrightTimeout:
+                raise AssertionError(f"{w}x{h}: no box of the country under the pointer (hover {page.get_attribute('#globe', 'data-hover')!r})")
             tip = page.locator(".globe-tip").bounding_box()
             inside = tip["x"] >= box["x"] - 1 and tip["y"] >= box["y"] - 1 and tip["x"] + tip["width"] <= box["x"] + box["width"] + 1 \
                 and tip["y"] + tip["height"] <= box["y"] + box["height"] + 1
@@ -473,7 +758,7 @@ def test_error_shown(page, base):
 
 
 TESTS = [test_type_world, test_short_then_longer, test_query_in_address, test_switch, test_country, test_insee,
-         test_country_in_world, test_capitals, test_you, test_histogram, test_rows, test_globe, test_globe_resize,
+         test_country_in_world, test_capitals, test_you, test_histogram, test_synthetic_nowhere_real, test_real_among_synthetic, test_names_whole, test_keyboard, test_keys, test_switch_country, test_rows, test_headers_stay, test_clear, test_definition, test_fits_the_window, test_globe, test_globe_resize,
          test_address_of_a_view, test_scroll_more,
          test_fast_typing_and_clear, test_reload_resets, test_new_build, test_error_shown]
 EXPECT_ERRORS = {test_error_shown}
@@ -536,9 +821,16 @@ def test_mobile_layout(page, base):
 
 
 def test_mobile_flow(page, base):
-    """With a touch screen: type a name, the switch, a country of the list, more people on scroll, the back button."""
+    """With a touch screen: the definition on a tap, type a name, the switch, a country of the list, more people on
+    scroll, the back button."""
     q = "Yuki Tanaka"
     start(page, base)
+    page.tap("#term")  # the definition: a tap opens it, in the screen; a tap elsewhere closes it
+    page.wait_for_selector("#entry", state="visible", timeout=WAIT)
+    box = page.locator("#entry").bounding_box()
+    assert box["x"] >= 0 and box["x"] + box["width"] <= page.viewport_size["width"] + 1, f"the definition is out of the screen: {box}"
+    page.tap("h1", position={"x": 4, "y": 4})  # a tap outside the card (it covers the field)
+    page.wait_for_selector("#entry", state="hidden", timeout=WAIT)
     page.tap("#q")
     page.keyboard.type(q)
     check_list(page, "world", q)
@@ -586,42 +878,61 @@ def run(browser, base, test, shots, device=None):
         context.close()
 
 
+def work(job):
+    """A worker process: one browser (or device), some tests. Returns their results, in order."""
+    kind, name, test_names, base, shots, headed = job
+    global SHOTS
+    SHOTS = shots
+    out = []
+    with sync_playwright() as p:
+        if kind == "device":
+            d = p.devices[name]
+            browser = getattr(p, d["default_browser_type"]).launch(headless=not headed)
+            device = {k: v for k, v in d.items() if k != "default_browser_type"}
+        else:
+            browser, device = getattr(p, name).launch(headless=not headed), None
+        for test_name in test_names:
+            ok, info = run(browser, base, globals()[test_name], shots, device)
+            out.append((name, test_name, ok, info))
+        browser.close()
+    return out
+
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--browser", nargs="*", default=["chromium", "webkit", "firefox"], help="chromium, webkit, firefox")
+    parser = argparse.ArgumentParser(description="End-to-end tests of web/. By default: Chromium only, no phones; --all "
+                                     "before a commit: the 3 browsers and the phone and tablet profiles.")
+    parser.add_argument("--all", action="store_true", help="chromium, webkit and firefox, and the devices of MOBILE")
+    parser.add_argument("--browser", nargs="*", help="chromium, webkit, firefox (default: chromium)")
+    parser.add_argument("--devices", nargs="*", help="phone and tablet profiles of Playwright (default: none)")
+    parser.add_argument("-k", help="run the tests whose name contains one of these words (comma or space separated)")
+    parser.add_argument("-j", "--jobs", type=int, default=min(6, os.cpu_count() or 2), help="worker processes")
     parser.add_argument("--headed", action="store_true")
-    parser.add_argument("--devices", nargs="*", default=MOBILE, help="phone and tablet profiles of Playwright")
-    parser.add_argument("-k", help="run the tests whose name contains this text")
     args = parser.parse_args()
+    browsers = args.browser if args.browser is not None else (["chromium", "webkit", "firefox"] if args.all else ["chromium"])
+    devices = args.devices if args.devices is not None else (MOBILE if args.all else [])
+    words = (args.k or "").replace(",", " ").split()
+    pick = lambda tests: [t.__name__ for t in tests if not words or any(w in t.__name__ for w in words)]  # noqa: E731
+    tests, mobile = pick(TESTS), pick(MOBILE_TESTS)
     version = json.load(open(f"{ROOT}/web/data/version.json"))["version"]
     server = Server(("127.0.0.1", 0), partial(Quiet, directory=f"{ROOT}/web"))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
-    global SHOTS
-    shots = SHOTS = tempfile.mkdtemp(prefix="anagraname-e2e-")
-    tests = [t for t in TESTS if not args.k or args.k in t.__name__]
-    mobile = [t for t in MOBILE_TESTS if not args.k or args.k in t.__name__]
-    print(f"web/ build {version} at {base}, {len(tests)} tests x {len(args.browser)} browsers,"
-          f" {len(mobile)} tests x {len(args.devices)} devices")
-    failed = 0
-    with sync_playwright() as p:
-        for name in args.browser:
-            browser = getattr(p, name).launch(headless=not args.headed)
-            for test in tests:
-                ok, info = run(browser, base, test, shots)
+    shots = tempfile.mkdtemp(prefix="anagranames-e2e-")
+    # the jobs: each browser and each device, its tests in chunks (a chunk: one launch of the browser)
+    groups = [("browser", b, tests) for b in browsers] + [("device", d, mobile) for d in devices if mobile]
+    size = max(1, math.ceil(sum(len(g[2]) for g in groups) / max(1, args.jobs)))
+    jobs = [(kind, name, names[i : i + size], base, shots, args.headed)
+            for kind, name, names in groups for i in range(0, len(names), size)]
+    print(f"web/ build {version} at {base}: {len(tests)} tests x {browsers}, {len(mobile)} tests x {len(devices)} devices,"
+          f" {len(jobs)} jobs on {args.jobs} processes", flush=True)
+    failed, t0 = 0, time.time()
+    with ProcessPoolExecutor(max_workers=args.jobs) as pool:
+        for done in as_completed([pool.submit(work, job) for job in jobs]):
+            for name, test_name, ok, info in done.result():
                 failed += not ok
-                print(f"{'PASS' if ok else 'FAIL'}  {name:8s} {test.__name__}  {info}", flush=True)
-            browser.close()
-        for dev in args.devices if mobile else []:
-            d = p.devices[dev]
-            browser = getattr(p, d["default_browser_type"]).launch(headless=not args.headed)
-            for test in mobile:
-                ok, info = run(browser, base, test, shots, {k: v for k, v in d.items() if k != "default_browser_type"})
-                failed += not ok
-                print(f"{'PASS' if ok else 'FAIL'}  {dev:20s} {test.__name__}  {info}", flush=True)
-            browser.close()
+                print(f"{'PASS' if ok else 'FAIL'}  {name:20s} {test_name}  {info}", flush=True)
     server.shutdown()
-    print(f"{failed} failed" if failed else "all passed")
+    print(f"{failed} failed" if failed else "all passed", f"in {time.time() - t0:.0f} s")
     sys.exit(1 if failed else 0)
 
 
