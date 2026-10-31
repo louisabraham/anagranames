@@ -1,0 +1,60 @@
+# Test the site and publish it on GitHub Pages. The data (app/data, built by export_app.py from name_dataset and the
+# trained models, ~550 MB) is not in git: it is the file app-data.tar of the release DATA_TAG.
+# A new data build: tar -cf app-data.tar -C app data, then gh release create data-vN app-data.tar, and set DATA_TAG.
+name: Test and publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATA_TAG: data-v1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: astral-sh/setup-uv@v6
+      - name: Data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$DATA_TAG" --pattern app-data.tar --output - | tar -x -C app
+      - name: Build
+        run: node web/build.mjs
+      - name: Python and TypeScript give the same results
+        run: uv run --no-project --with numpy python app/parity.py
+      - name: Browser
+        run: uv run --no-project --with playwright==1.64.1 playwright install --with-deps chromium
+      - name: End-to-end tests (Chromium)
+        run: uv run --no-project --with playwright==1.64.1 --with numpy python web/e2e.py
+      - name: The site
+        run: mkdir site && cp -r web/index.html web/how.html web/app.js web/anagram.js web/globe.js web/globe.json web/style.css web/fonts web/data site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
