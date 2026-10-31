@@ -36,7 +36,7 @@ const english = new Intl.DisplayNames(["en"], { type: "region" });
 const countryName = (c) => english.of(c).replace(/ SAR China$/, "");
 const sources = (await (await fetch(`data/packs.json${version}`)).json()).map((p) => {
   const text = p.world ? "World" : p.source === "INSEE" ? `${countryName(p.country)}, INSEE` : countryName(p.country);
-  return { ...p, text, size: `${(p.bytes / 1e6).toFixed(1)} MB` }; // size: shown while the file loads
+  return { ...p, text };
 });
 const byId = new Map(sources.map((s) => [s.id, s]));
 /** The country of a source for Model.search (null: the world, or the one country of the pack). */
@@ -119,13 +119,12 @@ input.addEventListener("input", (e) => {
 
 // ---------- files ----------
 const models = new Map(); // pack -> Promise<Model>
-const ready = new Set();
 function load(pack) {
   if (!models.has(pack)) {
     const model = fetch(`data/${pack}.anag.gz${version}`)
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status} for ${r.url}`))))
       .then((b) => Model.load(new Uint8Array(b)));
-    model.then(() => ready.add(pack), () => models.delete(pack));
+    model.catch(() => models.delete(pack));
     models.set(pack, model);
   }
   return models.get(pack);
@@ -154,7 +153,6 @@ async function fetchAll(id, model, pack, need, part) {
   if (!need.length && (part === null || model.hasPart(part))) return true;
   await new Promise((resolve) => setTimeout(resolve, PAUSE));
   if (id !== run) return false; // the visitor typed again
-  status.textContent = need.length ? `Loading ${need.length} files of names...` : "Loading the real names...";
   await Promise.all([...need.map(([side, c]) => loadChunk(model, pack, side, c)), part !== null && loadPart(model, pack, part)]);
   return id === run;
 }
@@ -199,7 +197,6 @@ async function update() {
   const id = ++run;
   try {
     const source = byId.get(view.from);
-    if (!ready.has(source.pack)) status.textContent = `Loading ${source.pack === "world" ? `the world file (${source.size})` : source.text}...`;
     const model = await load(source.pack);
     if (id !== run) return;
     await render(id, model, source);
@@ -308,6 +305,7 @@ async function countries(id, query, source) {
   const body = el("div", "pane-body", ...bars), at = $("hist").querySelector(".pane-body")?.scrollTop ?? 0;
   const focused = document.activeElement?.closest?.("#hist .hbar")?.dataset.country; // the keyboard: the same country
   box.replaceChildren(el("p", "pane-head", span("", "Countries"), span("count", n(rows.length))), body, ...box.querySelectorAll(".sbar"));
+  fold.mark();
   rove(box, focused ? bars.findIndex((b) => b.dataset.country === focused) : -1);
   body.scrollTop = at; // the same place in the list after a choice, with the chosen country in view
   const row = body.querySelector(".chosen");
@@ -469,6 +467,34 @@ input.addEventListener("keydown", (e) => {
   e.preventDefault();
   goTo($("hist"), firstCountry());
 });
+
+// On a phone, a tap on the message folds the globe, a tap on the header of the countries folds their list (a tap again:
+// open). The headers say it to screen readers (a button, open or not); on a computer, they do nothing.
+const phone = matchMedia("(max-width: 699px)");
+const fold = {
+  panes: { tally: () => document.querySelector(".globe-pane"), hist: () => $("hist") },
+  heads: { tally: () => $("tally"), hist: () => document.querySelector("#hist .pane-head") },
+  /** The state of the headers: a button on a phone, open or not. */
+  mark() {
+    for (const k of ["tally", "hist"]) {
+      const head = fold.heads[k]();
+      if (!head) continue;
+      if (phone.matches) {
+        head.setAttribute("role", "button");
+        head.setAttribute("aria-expanded", String(!fold.panes[k]().classList.contains("folded")));
+      } else ["role", "aria-expanded"].forEach((a) => head.removeAttribute(a));
+    }
+  },
+};
+for (const k of ["tally", "hist"]) {
+  fold.panes[k]().addEventListener("click", (e) => {
+    if (!phone.matches || !e.target.closest(k === "tally" ? "#tally" : "#hist .pane-head")) return;
+    fold.panes[k]().classList.toggle("folded");
+    fold.mark();
+  });
+}
+phone.addEventListener("change", fold.mark);
+fold.mark();
 
 // The three panels (globe, countries, people) fill the window under the question, and no more (the page does not
 // scroll on a computer): at least 320 px.

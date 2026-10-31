@@ -469,13 +469,49 @@ h1 .term[aria-expanded="true"] {
 @media (max-width: 699px) {
   .panes {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 320px auto auto;
+    grid-template-rows: auto auto auto;
   }
-  .hist {
-    max-height: 440px;
+  .globe-pane .globe {
+    flex: none;
+    height: 270px;
+  }
+  /* a tap on the message, or on the header of the countries, folds the globe or the list: an arrow says it */
+  #tally,
+  #hist .pane-head {
+    position: relative;
+    padding-right: 30px;
+    cursor: pointer;
+  }
+  #tally::after,
+  #hist .pane-head::after {
+    content: "▾";
+    position: absolute;
+    top: 0;
+    right: 8px;
+    color: var(--phos);
+  }
+  .globe-pane.folded #tally::after,
+  #hist.folded .pane-head::after {
+    content: "▸";
+  }
+  .globe-pane.folded .globe,
+  #hist.folded .pane-body,
+  #hist.folded .sbar {
+    display: none !important;
+  }
+  .globe-pane.folded #tally,
+  #hist.folded .pane-head {
+    margin-bottom: 12px;
+    border-bottom: 0;
+  }
+  .hist { /* about 5 countries, then the list scrolls */
+    max-height: 290px;
+  }
+  .hist.folded {
+    max-height: none;
   }
   .hist .pane-body {
-    max-height: 380px;
+    max-height: 230px;
   }
 }
 /* the scroll bar of a list (app.js): a thin line, and a rectangle on it; the bar of the browser is hidden */
@@ -567,7 +603,7 @@ h1 .term[aria-expanded="true"] {
   width: 100%;
   height: 100%;
   cursor: grab;
-  touch-action: pan-y; /* a drag down scrolls the page; a drag across turns the globe */
+  touch-action: none; /* a finger turns the globe, in all directions (the page scrolls out of it) */
 }
 .globe canvas.dragging {
   cursor: grabbing;

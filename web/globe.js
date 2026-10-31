@@ -1,6 +1,6 @@
 // The globe of the anagrams: the countries of Natural Earth (globe.json, made by web/globe_prep.py) on a sphere,
 // drawn as the screen of an oscilloscope. It turns slowly on its own (not for a visitor who asks for less motion), turns
-// with the mouse or a finger (on a touch screen, a drag across; a drag down scrolls the page), shows the numbers of the
+// with the mouse or a finger (in all directions: on the globe, a finger does not scroll the page), shows the numbers of the
 // country under the pointer (a dot, a line, a box), and chooses a country with a click.
 // Orthographic projection: a point (lon, lat) of the earth is a unit vector; the view turns it so that the center of
 // the view (this.lon, this.lat) faces the screen; z > 0: the point is on the side of the screen.
@@ -386,7 +386,7 @@ export class Globe {
         if (d.moved) {
           const k = 1 / (this.R * DEG); // degrees per pixel: the earth follows the pointer at the center
           this.lon = d.lon - (x - d.x) * k;
-          if (!d.touch) this.lat = clampLat(d.lat + (y - d.y) * k);
+          this.lat = clampLat(d.lat + (y - d.y) * k);
           const now = performance.now();
           if (now > d.t) this.velocity = (-(x - d.lx) * k) / (now - d.t);
           [d.t, d.lx] = [now, x];
@@ -417,7 +417,7 @@ export class Globe {
       this.wake();
     };
     c.addEventListener("pointerup", (e) => end(e, true));
-    c.addEventListener("pointercancel", (e) => end(e, false)); // the browser scrolls the page
+    c.addEventListener("pointercancel", (e) => end(e, false)); // the browser takes the touch (a pinch to zoom)
     c.addEventListener("pointerleave", () => {
       if (this.down) return;
       this.hover = null;
