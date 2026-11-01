@@ -237,12 +237,12 @@ async function render(id, model, source) {
   await countries(id, query, source);
 }
 
-/** The message at the top of the globe, always about the world (not the chosen country): the real names; with the
- * synthetic names, the names generated too. sum: the summary of the search in the world. */
+/** The message at the top of the globe, always about the world (not the chosen country): the real names and their
+ * accounts; with the synthetic names, the names generated too. sum: the summary of the search in the world. */
 function tally(sum) {
   const count = (x, one, many) => [el("b", "", n(x)), ` ${x === 1 ? one : many}`], synthetic = sum.found - sum.realNames;
-  const lines = [el("p", "real", ...(sum.realNames ? [...count(sum.realNames, "anagraname has", "anagranames have"), " Facebook accounts"]
-    : ["No anagraname has Facebook accounts"]))];
+  const lines = [el("p", "real", "Found ", ...count(sum.realNames, "real anagraname", "real anagranames")),
+    el("p", "accounts", "on ", ...count(sum.realPeople, "Facebook account", "Facebook accounts"))];
   if (view.synthetic) {
     lines.push(el("p", "generated", ...(synthetic ? [...count(synthetic, "synthetic anagraname", "synthetic anagranames"), " generated"]
       : ["No synthetic anagraname generated"])));

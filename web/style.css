@@ -566,7 +566,7 @@ h1 .term[aria-expanded="true"] {
 }
 .tally {
   flex: none;
-  min-height: calc(3em + 9px); /* room for two lines: the globe does not move with the switch */
+  min-height: calc(4.5em + 9px); /* room for three lines: the globe does not move with the switch */
   margin: 12px 12px 0;
   padding: 0 8px 8px;
   border-bottom: 1px solid var(--line);

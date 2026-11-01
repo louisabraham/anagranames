@@ -43,7 +43,7 @@ jobs:
       - name: End-to-end tests (Chromium)
         run: uv run --no-project --with playwright==1.64.1 --with numpy python web/e2e.py
       - name: The site
-        run: mkdir site && cp -r web/index.html web/how.html web/app.js web/anagram.js web/globe.js web/globe.json web/style.css web/fonts web/data site/
+        run: mkdir site && cp -r web/index.html web/how.html web/app.js web/anagram.js web/globe.js web/globe.json web/style.css web/favicon.svg web/favicon-32.png web/apple-touch-icon.png web/fonts web/data site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

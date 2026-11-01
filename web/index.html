@@ -5,11 +5,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <title>ANAGRANAMES</title>
   <meta name="description"
     content="Who and where are your anagranames? The people whose full name has exactly the letters of yours.">
   <link rel="stylesheet" href="style.css">
+  <!-- Analytics (PostHog), the same as on the rest of louisabraham.github.io: the file /assets/js/ph.js of the main
+       site has the key and the settings. A local copy (a file, or a server on this computer, as in web/e2e.py) does
+       not have this file, so there the page does not ask for it. -->
+  <script type="module">
+    const host = location.hostname;
+    if (!["", "localhost", "127.0.0.1", "[::1]", "0.0.0.0"].includes(host) && !host.endsWith(".local"))
+      document.head.append(Object.assign(document.createElement("script"), { src: "/assets/js/ph.js" }));
+  </script>
   <script type="module">
     // The build version (data/version.json, written by web/build.mjs) is in the address of app.js and of the files
     // that it loads. A browser asks the server for the version each time, so it never mixes two builds.

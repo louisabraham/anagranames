@@ -96,10 +96,10 @@ def check_message(page, query, synthetic):
     """The message at the top of the globe: about the world (whatever the country chosen or with the focus), the real
     names; with the synthetic names, the names generated too."""
     w = expected("world", query, 0)
-    rn, z = w["real_names"], w["found"] - w["real_names"]
-    real = f"{n(rn)} anagraname{'s have' if rn > 1 else ' has'} Facebook accounts" if rn else "No anagraname has Facebook accounts"
+    rn, rp, z = w["real_names"], w["real_people"], w["found"] - w["real_names"]
+    real = [f"Found {n(rn)} real anagraname{'' if rn == 1 else 's'}", f"on {n(rp)} Facebook account{'' if rp == 1 else 's'}"]
     gen = f"{n(z)} synthetic anagraname{'s' if z > 1 else ''} generated" if z else "No synthetic anagraname generated"
-    want = [real, gen] if synthetic else [real]
+    want = real + [gen] if synthetic else real
     try:
         page.wait_for_function("w => JSON.stringify([...document.querySelectorAll('#tally p')].map((p) => p.textContent)) === w",
                                arg=json.dumps(want, separators=(",", ":"), ensure_ascii=False), timeout=WAIT)

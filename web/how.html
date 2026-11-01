@@ -3,10 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
+<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>How it works · ANAGRANAMES</title>
 <meta name="description" content="Where the names come from, how the page finds the anagrams, and how the model gives their probability.">
 <link rel="stylesheet" href="style.css">
+<!-- Analytics (PostHog), the same as on the rest of louisabraham.github.io: the file /assets/js/ph.js of the main
+     site has the key and the settings. A local copy (a file, or a server on this computer, as in web/e2e.py) does not
+     have this file, so there the page does not ask for it. -->
+<script type="module">
+const host = location.hostname;
+if (!["", "localhost", "127.0.0.1", "[::1]", "0.0.0.0"].includes(host) && !host.endsWith(".local"))
+  document.head.append(Object.assign(document.createElement("script"), { src: "/assets/js/ph.js" }));
+</script>
 <script type="module">
 const { version } = await (await fetch("data/version.json", { cache: "no-cache" })).json();
 document.querySelector('link[href="style.css"]').href = `style.css?v=${version}`;
