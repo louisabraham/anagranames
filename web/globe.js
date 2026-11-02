@@ -367,9 +367,17 @@ export class Globe {
       return [e.clientX - b.left, e.clientY - b.top];
     };
     const at = (e) => this.countryAt(this.toEarth(...point(e)));
+    // A finger on the globe turns it; a finger on the box outside the globe scrolls the page: the canvas lets the
+    // browser scroll (touch-action: manipulation), and a touch that starts on the globe stops it.
+    c.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) return; // two fingers: the browser zooms
+      const b = c.getBoundingClientRect(), t = e.touches[0];
+      if (this.toEarth(t.clientX - b.left, t.clientY - b.top)) e.preventDefault();
+    }, { passive: false });
     c.addEventListener("pointerdown", (e) => {
       if (e.button) return;
       const [x, y] = point(e);
+      if (e.pointerType === "touch" && !this.toEarth(x, y)) return; // outside the globe: the page scrolls
       this.down = { x, y, lon: this.lon, lat: this.lat, moved: false, touch: e.pointerType === "touch", t: performance.now(), lx: x };
       this.spin = 0;
       this.tween = null;
@@ -377,6 +385,7 @@ export class Globe {
     });
     c.addEventListener("pointermove", (e) => {
       const [x, y] = point(e), d = this.down;
+      if (!d && e.pointerType === "touch") return; // a finger that scrolls the page
       if (d) {
         if (!d.moved && Math.abs(x - d.x) + Math.abs(y - d.y) > 4) {
           d.moved = true;

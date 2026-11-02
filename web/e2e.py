@@ -788,8 +788,8 @@ LAYOUT = [("empty", "/", "document.body.dataset.ready"),
 
 def test_mobile_layout(page, base):
     """For each view: no part wider than the screen, text of 16 px at least in the fields (else iOS zooms in),
-    controls of 44 px and links of 32 px at least for a finger, the globe in its box, the top bar at the top after a
-    scroll."""
+    controls of 44 px and links of 32 px at least for a finger, on a phone the globe and the countries folded at first,
+    the globe in its box (opened), the top bar at the top after a scroll."""
     for name, url, ready in LAYOUT:
         page.goto(base + url)
         page.wait_for_function(ready, timeout=WAIT)
@@ -803,6 +803,10 @@ def test_mobile_layout(page, base):
         assert not m["controls"], f"{name}: controls smaller than 44 px: {m['controls'][:6]}"
         assert not m["links"], f"{name}: links smaller than 32 px: {m['links'][:6]}"
         if ready == READY:
+            if m["vw"] < 700:  # a phone: the globe and the list of the countries start folded
+                folded = page.evaluate("['.globe-pane', '#hist'].map((s) => document.querySelector(s).classList.contains('folded'))")
+                assert folded == [True, True], f"{name}: on a phone, folded at first (globe, countries): {folded}"
+                page.tap("#tally")
             check_globe(page, name)
         page.evaluate("scrollTo(0, document.scrollingElement.scrollHeight)")
         page.wait_for_timeout(300)
@@ -825,6 +829,8 @@ def test_mobile_flow(page, base):
     page.keyboard.type(q)
     check_list(page, "world", q)
     wait_hist(page)
+    if page.viewport_size["width"] < 700:
+        page.tap("#hist .pane-head")  # a phone: the list of the countries starts folded
     page.tap("#hist .hbar[data-country='JP']")  # Japan: in the first countries of the real people
     check_list(page, "JP", q)
     page.tap("#synthetic")
@@ -836,61 +842,77 @@ def test_mobile_flow(page, base):
 
 
 def test_mobile_globe(page, base):
-    """With a finger, the globe turns in all directions and the page does not scroll (touch-action: none). A swipe up
-    and across on Chromium (its touch events); the style on the others. On a phone, the list of the countries is short
-    (about 5 countries, then it scrolls)."""
+    """With a finger, the globe turns in all directions and the page does not scroll; a finger on the box outside the
+    globe scrolls the page (touch-action: manipulation, and globe.js stops the scroll of a touch on the globe). Swipes
+    on Chromium (its touch events); the style on the others. On a phone, the list of the countries is short (about 5
+    countries, then it scrolls)."""
     start(page, base, "Yuki Tanaka")
     check_list(page, "world", "Yuki Tanaka")
-    page.wait_for_function("document.getElementById('globe').globe", timeout=WAIT)
-    if page.viewport_size["width"] < 700:  # a phone: a short list of the countries (it scrolls)
-        wait_hist(page)
+    wait_hist(page)
+    if page.viewport_size["width"] < 700:  # a phone: open the globe and the list (folded at first)
+        page.tap("#tally")
+        page.tap("#hist .pane-head")
         height = page.evaluate("document.getElementById('hist').getBoundingClientRect().height")
         assert height <= 300, f"the list of the countries is {height:.0f} px high on a phone"
+    page.wait_for_function("document.getElementById('globe').globe", timeout=WAIT)
     action = page.evaluate("getComputedStyle(document.querySelector('#globe canvas')).touchAction")
-    assert action == "none", f"touch-action of the globe: {action}"
+    assert action == "manipulation", f"touch-action of the globe: {action}"
     if page.context.browser.browser_type.name != "chromium":
         return
     page.evaluate("document.getElementById('globe').scrollIntoView({ block: 'center' })")
     page.wait_for_timeout(300)
-    box = page.locator("#globe canvas").bounding_box()
-    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-    before = page.evaluate("[document.getElementById('globe').globe.lat, document.getElementById('globe').globe.lon, scrollY]")
     cdp = page.context.new_cdp_session(page)
-    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
-    for i in range(1, 11):
-        cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x - 4 * i, "y": y + 6 * i}]})
-        page.wait_for_timeout(16)
-    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
-    page.wait_for_timeout(300)
-    after = page.evaluate("[document.getElementById('globe').globe.lat, document.getElementById('globe').globe.lon, scrollY]")
+
+    def swipe(x, y, dx, dy):  # 10 steps of (dx, dy)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        for i in range(1, 11):
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x + dx * i, "y": y + dy * i}]})
+            page.wait_for_timeout(16)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        page.wait_for_timeout(300)
+        return page.evaluate("[document.getElementById('globe').globe.lat, document.getElementById('globe').globe.lon, scrollY]")
+
+    box = page.locator("#globe canvas").bounding_box()
+    before = page.evaluate("[document.getElementById('globe').globe.lat, document.getElementById('globe').globe.lon, scrollY]")
+    after = swipe(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, -4, 6)
     assert after[0] > before[0] + 2, f"a swipe down does not turn the globe: latitude {before[0]:.1f} -> {after[0]:.1f}"
     assert after[1] > before[1] + 1, f"a swipe across does not turn the globe: longitude {before[1]:.1f} -> {after[1]:.1f}"
     assert after[2] == before[2], f"the page scrolls under the globe: {before[2]} -> {after[2]}"
+    before = after  # a corner of the box, outside the globe: the finger goes up, the page scrolls down
+    after = swipe(box["x"] + 6, box["y"] + box["height"] - 6, 0, -12)
+    assert after[2] > before[2] + 20, f"a swipe outside the globe does not scroll the page: {before[2]} -> {after[2]}"
+    assert after[0] == before[0], f"a swipe outside the globe turns it: latitude {before[0]:.1f} -> {after[0]:.1f}"
 
 
 def test_mobile_fold(page, base):
-    """On a phone, a tap on the message folds the globe, a tap on the header of the countries folds their list, and a
-    tap again opens them (the globe drawn again); the list stays folded when it changes (the switch). Not on a tablet."""
+    """On a phone, the globe and the list of the countries start folded; a tap on the message opens the globe (drawn),
+    a tap on the header of the countries opens their list, and a tap again folds them; the list stays folded when it
+    changes (the switch). On a tablet, they are open and a tap does nothing."""
     start(page, base, "Yuki Tanaka")
     check_list(page, "world", "Yuki Tanaka")
     wait_hist(page)
     phone = page.viewport_size["width"] < 700
+
+    def hidden():
+        return [page.locator("#globe").is_hidden(), page.locator("#hist .pane-body").is_hidden()]
+
+    assert hidden() == [phone, phone], f"at first, hidden (globe, countries): {hidden()}, phone: {phone}"
     page.tap("#tally")
     page.tap("#hist .pane-head")
     page.wait_for_timeout(300)
-    folded = [page.locator("#globe").is_hidden(), page.locator("#hist .pane-body").is_hidden()]
-    assert folded == [phone, phone], f"after a tap on the headers, hidden (globe, countries): {folded}, phone: {phone}"
+    assert hidden() == [False, False], f"after a tap on the headers, hidden (globe, countries): {hidden()}, phone: {phone}"
     if not phone:
         return
+    assert page.get_attribute("#tally", "aria-expanded") == "true", "the message does not say that the globe is open"
+    check_globe(page, "opened")
+    page.tap("#tally")
+    page.tap("#hist .pane-head")
+    page.wait_for_timeout(300)
+    assert hidden() == [True, True], f"a tap again does not fold them: hidden (globe, countries): {hidden()}"
     assert page.get_attribute("#tally", "aria-expanded") == "false", "the message does not say that the globe is folded"
     page.tap("#synthetic")
     check_list(page, "world", "Yuki Tanaka", synthetic=True)
     assert page.locator("#hist .pane-body").is_hidden(), "the list of the countries opens again when it changes"
-    page.tap("#tally")
-    page.tap("#hist .pane-head")
-    page.wait_for_timeout(300)
-    assert page.locator("#globe").is_visible() and page.locator("#hist .pane-body").is_visible(), "a tap again does not open them"
-    check_globe(page, "opened again")
 
 
 MOBILE_TESTS = [test_mobile_layout, test_mobile_flow, test_mobile_globe, test_mobile_fold]

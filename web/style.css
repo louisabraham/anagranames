@@ -603,7 +603,7 @@ h1 .term[aria-expanded="true"] {
   width: 100%;
   height: 100%;
   cursor: grab;
-  touch-action: none; /* a finger turns the globe, in all directions (the page scrolls out of it) */
+  touch-action: manipulation; /* the page scrolls, except for a touch that starts on the globe (globe.js) */
 }
 .globe canvas.dragging {
   cursor: grabbing;

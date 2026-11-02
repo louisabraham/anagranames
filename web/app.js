@@ -468,8 +468,9 @@ input.addEventListener("keydown", (e) => {
   goTo($("hist"), firstCountry());
 });
 
-// On a phone, a tap on the message folds the globe, a tap on the header of the countries folds their list (a tap again:
-// open). The headers say it to screen readers (a button, open or not); on a computer, they do nothing.
+// On a phone, the globe and the list of the countries start folded: a tap on the message opens the globe, a tap on the
+// header of the countries opens their list (a tap again: folds). The headers say it to screen readers (a button, open
+// or not); on a computer, they do nothing.
 const phone = matchMedia("(max-width: 699px)");
 const fold = {
   panes: { tally: () => document.querySelector(".globe-pane"), hist: () => $("hist") },
@@ -493,6 +494,7 @@ for (const k of ["tally", "hist"]) {
     fold.mark();
   });
 }
+if (phone.matches) for (const k of ["tally", "hist"]) fold.panes[k]().classList.add("folded");
 phone.addEventListener("change", fold.mark);
 fold.mark();
 
