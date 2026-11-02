@@ -1,5 +1,5 @@
 // Build the website in web/: anagram.js (app/anagram.ts without its types), the packs in data/ with the list of
-// the sources data/packs.json (the world, France from INSEE, and each country of the world pack).
+// the sources data/packs.json (the world and each country of the world pack).
 // The world pack has its real full names in data/world.real/ and the data of its names in data/world.names/.
 // data/version.json gives the build version: a hash of the code and of the sizes and dates of the packs.
 // Run: node web/build.mjs   then serve web/, for example: python3 -m http.server -d web 8000
@@ -28,7 +28,6 @@ for (const file of readdirSync(`${root}app/data`).sort()) {
     if (existsSync(`${root}app/data/${dir}`)) cpSync(`${root}app/data/${dir}`, `${web}data/${dir}`, { recursive: true });
   }
   const bytes = statSync(`${web}data/${file}`).size;
-  if (pack === "FR-insee") packs.push({ id: pack, pack, world: false, country: "FR", source: "INSEE", bytes });
   if (pack !== "world") continue;
   packs.push({ id: pack, pack, world: true, country: null, source: "name_dataset", bytes });
   const raw = gunzipSync(readFileSync(`${web}data/${file}`));

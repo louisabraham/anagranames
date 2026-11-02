@@ -1,7 +1,6 @@
 // Command line for app/anagram.ts, with the options of app/anagram.py. Node 22.18+ runs TypeScript directly.
 //   node app/cli.ts "Elena Ourgaud"                        world: world mixture
 //   node app/cli.ts "Elena Ourgaud" --country FR           world, France: the names seen in France
-//   node app/cli.ts "Elena Ourgaud" --insee                pack FR-insee: INSEE names, FR model
 //   node app/cli.ts --check                                compare with the values of pairmodel.py
 // Without a query, the queries are read from stdin, one per line.
 import { existsSync } from "node:fs";
@@ -17,7 +16,6 @@ const { values: opt, positionals: queries } = parseArgs({
   allowPositionals: true,
   options: {
     country: { type: "string" },
-    insee: { type: "boolean", default: false },
     pack: { type: "string" },
     limit: { type: "string", short: "n", default: "20" },
     json: { type: "boolean", default: false },
@@ -26,13 +24,9 @@ const { values: opt, positionals: queries } = parseArgs({
   },
 });
 
-/** The pack file of the options: --pack, else FR-insee with --insee, else the world pack. */
+/** The pack file of the options: --pack, else the world pack. */
 function packPath(): string {
-  if (opt.insee && opt.country !== undefined && opt.country !== "FR") {
-    console.error("INSEE data covers France only");
-    process.exit(1);
-  }
-  const name = opt.pack ?? (opt.insee ? "FR-insee" : "world");
+  const name = opt.pack ?? "world";
   return existsSync(name) ? name : join(opt.data, `${name}.anag.gz`);
 }
 

@@ -49,10 +49,9 @@ def model(pack):
 
 
 def population(source):
-    """The people of a source, as the page counts them: the world, its country, or the one country of a pack."""
-    pack = source if source in ("world", "FR-insee") else "world"
-    meta = anagram.read_pack(f"{ROOT}/app/data/{pack}.anag.gz")[0]
-    return sum(meta["population"]) if source == "world" else meta["population"][0 if pack == source else meta["countries"].index(source)]
+    """The people of a source, as the page counts them: the world or a country."""
+    meta = anagram.read_pack(f"{ROOT}/app/data/world.anag.gz")[0]
+    return sum(meta["population"]) if source == "world" else meta["population"][meta["countries"].index(source)]
 
 
 def close(text, want):
@@ -64,10 +63,9 @@ def close(text, want):
 
 
 def expected(source, query, limit=50, by_model=False):
-    """The search of app/anagram.py in a source: world, FR-insee or a country code (in the world pack); by_model: all
-    the names, the most probable first."""
-    pack = source if source in ("world", "FR-insee") else "world"
-    return model(pack).search(query, None if pack == source else source, limit, by_model)
+    """The search of app/anagram.py in a source: world or a country code; by_model: all the names, the most probable
+    first."""
+    return model("world").search(query, None if source == "world" else source, limit, by_model)
 
 
 class Server(http.server.ThreadingHTTPServer):
@@ -226,14 +224,6 @@ def test_country(page, base):
     page.click("#hist .hbar.chosen")  # the chosen country again: the world
     check_list(page, "world", "Marie Inuzuka")
     assert page.locator("#hist .hbar.chosen").count() == 0, "a country stays chosen"
-
-
-def test_insee(page, base):
-    """France from INSEE, by its address: one pack file; INSEE has no real full names, the synthetic people only."""
-    start(page, base, "Elena Ourgaud", "FR-insee")
-    check_list(page, "FR-insee", "Elena Ourgaud")
-    page.click("#synthetic")
-    check_list(page, "FR-insee", "Elena Ourgaud", synthetic=True)
 
 
 def test_country_in_world(page, base):
@@ -757,7 +747,7 @@ def test_error_shown(page, base):
     page.wait_for_function("document.getElementById('status').textContent.startsWith('Error: 503')", timeout=WAIT)
 
 
-TESTS = [test_type_world, test_short_then_longer, test_query_in_address, test_switch, test_country, test_insee,
+TESTS = [test_type_world, test_short_then_longer, test_query_in_address, test_switch, test_country,
          test_country_in_world, test_capitals, test_you, test_histogram, test_synthetic_nowhere_real, test_real_among_synthetic, test_names_whole, test_keyboard, test_keys, test_switch_country, test_rows, test_headers_stay, test_clear, test_definition, test_fits_the_window, test_globe, test_globe_resize,
          test_address_of_a_view, test_scroll_more,
          test_fast_typing_and_clear, test_reload_resets, test_new_build, test_error_shown]

@@ -30,18 +30,18 @@ function el(tag, className, ...children) {
   return e;
 }
 
-// ---------- sources: the world, France from INSEE (by its address only), the countries of the world ----------
+// ---------- sources: the world and its countries ----------
 const english = new Intl.DisplayNames(["en"], { type: "region" });
 /** The name of a country, short: Hong Kong, not Hong Kong SAR China. */
 const countryName = (c) => english.of(c).replace(/ SAR China$/, "");
 const sources = (await (await fetch(`data/packs.json${version}`)).json()).map((p) => {
-  const text = p.world ? "World" : p.source === "INSEE" ? `${countryName(p.country)}, INSEE` : countryName(p.country);
+  const text = p.world ? "World" : countryName(p.country);
   return { ...p, text };
 });
 const byId = new Map(sources.map((s) => [s.id, s]));
-/** The country of a source for Model.search (null: the world, or the one country of the pack). */
-const countryOf = (source) => (source.world || source.source === "INSEE" ? null : source.country);
-/** The people of a source: the world, or its country (the population of the pack). */
+/** The country of a source for Model.search (null: the world). */
+const countryOf = (source) => (source.world ? null : source.country);
+/** The people of a source: the world, or its country. */
 function populationOf(model, source) {
   const c = countryOf(source);
   return c === null ? model.population.reduce((s, x) => s + x, 0) : model.population[model.countries.indexOf(c)];

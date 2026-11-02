@@ -8,7 +8,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 QUERIES = ["Elena Ourgaud", "Louis Abraham", "Marie Curie", "Jean-Paul Sartre", "Zoë Ångström",
            "Ali Khan", "Wolfgang Amadeus Mozart", "Łukasz Żółć", "aurélie coursimault"]
-PACKS = [[], ["--country", "FR"], ["--insee"], ["--country", "JP"], ["--country", "US"]]
+PACKS = [[], ["--country", "FR"], ["--country", "JP"], ["--country", "US"]]
 DETAILS = ("real", "first_people", "first_countries", "last_people", "last_countries", "real_countries")
 LIMIT = 50
 

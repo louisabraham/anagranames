@@ -3,7 +3,6 @@
 #
 #   python app/anagram.py "Elena Ourgaud"                        world: world mixture
 #   python app/anagram.py "Elena Ourgaud" --country FR           world, France: the names seen in France
-#   python app/anagram.py "Elena Ourgaud" --insee                pack FR-insee: INSEE names, FR model
 #   python app/anagram.py --check                                compare with the values of pairmodel.py
 # Without a query, the queries are read from stdin, one per line.
 #
@@ -118,8 +117,7 @@ class Side:
 
     def __init__(self, meta, side, sections, chunk_dir):
         m = meta[side]
-        if "chunk" in m:
-            sections = {**sections, **read_chunks(chunk_dir, side, m)}
+        sections = {**sections, **read_chunks(chunk_dir, side, m)}
         get = lambda name: sections[f"{side}.{name}"]
         self.n = m["names"]
         letters, end, ends = get("letters"), np.arange(m["nodes"]) + varints(get("sizes")), varints(get("ends"))
@@ -133,14 +131,13 @@ class Side:
         self.count = varints(get("count")).astype(np.float64)
         self.total = varints(get("total"))
         self.alpha_prior = meta["alpha"] * (self.total + 0.5) / m["prior_norm"]  # alpha pi
-        if "parts" in meta:
-            # part of each name: the sum of part_hash over the letters of its node and of the nodes above it
-            w = np.array(meta["part_hash"], np.int64)[[ord(ch) - 65 for ch in meta["alphabet"]]][letters]
-            d = np.zeros(m["nodes"] + 1, np.int64)
-            d[:-1] += w
-            np.subtract.at(d, end, w)
-            self.part = np.repeat(np.cumsum(d)[:-1], ends) % meta["parts"]
-            self.by_rank = np.lexsort((np.arange(self.n), -self.total))  # most people first
+        # part of each name: the sum of part_hash over the letters of its node and of the nodes above it
+        w = np.array(meta["part_hash"], np.int64)[[ord(ch) - 65 for ch in meta["alphabet"]]][letters]
+        d = np.zeros(m["nodes"] + 1, np.int64)
+        d[:-1] += w
+        np.subtract.at(d, end, w)
+        self.part = np.repeat(np.cumsum(d)[:-1], ends) % meta["parts"]
+        self.by_rank = np.lexsort((np.arange(self.n), -self.total))  # most people first
         self.log_norm = np.log(np.array(m["people"], np.float64) + meta["alpha"])  # log(N_c + alpha)
         self.scale = np.array(m.get("scale", [1.0] * len(m["people"])), np.float64)  # people of the model per count
 
@@ -204,16 +201,12 @@ class Model:
             self.rank[ord(ch) - 65] = i
         base = path.removesuffix(".gz").removesuffix(".anag")
         self.first, self.last = (Side(meta, side, sections, f"{base}.names") for side in ("first", "last"))
-        self.parts = meta.get("parts")
-        if self.parts:
-            self.part_dir = f"{base}.real"
-            L = self.last
-            self.by_class = np.lexsort((np.arange(L.n), -L.total, L.part))  # last names by class, then by rank
-            self.class_start = np.searchsorted(L.part[self.by_class], np.arange(self.parts))
-            self.part_cache = {}
-        else:
-            self.pair_key = np.cumsum(varints(sections["pairs.key"]))  # first id * n_last + last id, increasing
-            self.pair_count = varints(sections["pairs.count"])
+        self.parts = meta["parts"]
+        self.part_dir = f"{base}.real"
+        L = self.last
+        self.by_class = np.lexsort((np.arange(L.n), -L.total, L.part))  # last names by class, then by rank
+        self.class_start = np.searchsorted(L.part[self.by_class], np.arange(self.parts))
+        self.part_cache = {}
 
     def log_p(self, f, l, c=None):
         """log p(f_i, l_i | c) for arrays of name ids: (m, len(c)), all pack countries when c is None."""
@@ -258,8 +251,6 @@ class Model:
     def real(self, f, l, c=None):
         """People with the full names (f_i, l_i) in the pack countries, or in pack country c (0: none)."""
         f, l = np.asarray(f), np.asarray(l)
-        if not self.parts:
-            return find(self.pair_key, self.pair_count, f * self.last.n + l)
         j = (self.first.part[f] + self.last.part[l]) % self.parts
         out = np.zeros(len(f), np.int64)
         for p in np.unique(j):
@@ -270,9 +261,9 @@ class Model:
 
     def real_countries(self, f, l, c=None):
         """[country, people] of the full name (f, l) in the pack countries (or in pack country c), most people first."""
-        if not self.parts or c is not None:
+        if c is not None:
             n = int(self.real([f], [l], c)[0])
-            return [[self.countries[c or 0], n]] if n else []
+            return [[self.countries[c], n]] if n else []
         part, k = self.part(int((self.first.part[f] + self.last.part[l]) % self.parts)), f * self.last.n + l
         i = np.searchsorted(part["key"], k)
         if i == len(part["key"]) or part["key"][i] != k:
@@ -358,22 +349,18 @@ class Model:
 
     def search(self, query, country=None, limit=20, by_model=False):
         """The anagram names of the query: the real full names first (most people first), then the most probable.
-        With a country of a pack of several countries: the anagrams of the names seen in it, its real people, and
-        its synthetic names: no real person anywhere in the pack. by_model: all the names, the most probable first."""
+        With a country: the anagrams of the names seen in it, its real people, and its synthetic names: no real
+        person anywhere in the pack. by_model: all the names, the most probable first."""
         f, l = self.anagrams(query)
-        if country is None and len(self.countries) == 1:
-            country = self.countries[0]
         c = None if country is None else self.countries.index(country)
         if c is None:
             lp, best = self.log_p_mixture(f, l)
         else:
-            if len(self.countries) > 1:
-                keep = self.first.seen(f, c) & self.last.seen(l, c)
-                f, l = f[keep], l[keep]
+            keep = self.first.seen(f, c) & self.last.seen(l, c)
+            f, l = f[keep], l[keep]
             lp, best = self.log_p(f, l, c)[:, 0], np.full(len(f), c)
-        c = None if len(self.countries) == 1 else c  # one country: all the people of the pack
         real = self.real(f, l, c)
-        if c is not None:  # a country of the world: a synthetic name has no real person anywhere
+        if c is not None:  # a country: a synthetic name has no real person anywhere
             keep = (real > 0) | (self.real(f, l, None) == 0)
             f, l, real, lp, best = f[keep], l[keep], real[keep], lp[keep], best[keep]
         top = (np.lexsort((l, f, -lp)) if by_model else np.lexsort((l, f, -lp, -real)))[:limit]
@@ -428,10 +415,8 @@ def check(model, path):
 
 
 def pack_path(args):
-    """The pack file of the options: --pack, else FR-insee with --insee, else the world pack."""
-    if args.insee and args.country not in (None, "FR"):
-        sys.exit("INSEE data covers France only")
-    name = args.pack or ("FR-insee" if args.insee else "world")
+    """The pack file of the options: --pack, else the world pack."""
+    name = args.pack or "world"
     return name if os.path.exists(name) else f"{args.data}/{name}.anag.gz"
 
 
@@ -439,8 +424,7 @@ def main():
     parser = argparse.ArgumentParser(description="Full names whose letters are the letters of the query.")
     parser.add_argument("query", nargs="*", help="one query per argument (none: read lines from stdin)")
     parser.add_argument("--country", help="country code (e.g. FR): the names seen in it; default: world mixture")
-    parser.add_argument("--insee", action="store_true", help="France from INSEE data (with the FR model)")
-    parser.add_argument("--pack", help="pack name (world, FR-insee) or file; default: world (FR-insee with --insee)")
+    parser.add_argument("--pack", help="pack name or file; default: world")
     parser.add_argument("-n", "--limit", type=int, default=20)
     parser.add_argument("--json", action="store_true", help="one JSON object per query")
     parser.add_argument("--data", default=DATA)

@@ -12,10 +12,31 @@
 #   caffeinate -i .venv/bin/python export_app.py --packs world   (data_fr_insee and this model by default)
 import argparse
 import os
+from collections import Counter
 
 import numpy as np
 
-from export_app import INSEE_FIRST, INSEE_LAST, insee_counts
+from export_app import key_of
+
+INSEE_FIRST, INSEE_LAST = "nat2022.csv", "noms2008nat_txt.txt"
+
+
+def insee_counts(path, last):
+    """{key: (display form, people)} from an INSEE file. The display form is the most frequent spelling."""
+    forms = {}
+    lines = open(path, encoding="utf-8").read().splitlines()[1:]
+    for line in lines:
+        if last:
+            name, *n = line.rsplit(None, 11)
+        else:
+            _, name, _, n = line.split(";")
+            n = [n]
+        if name.startswith("_") or name == "AUTRES NOMS":  # rare names grouped together
+            continue
+        k = key_of(name)
+        if len(k) >= 2:
+            forms.setdefault(k, Counter())[name] += sum(map(int, n))
+    return {k: (c.most_common(1)[0][0].title(), sum(c.values())) for k, c in forms.items()}
 
 
 def main():

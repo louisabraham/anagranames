@@ -1,21 +1,18 @@
 # Export the packs of the anagram apps (app/anagram.py, app/anagram.ts) to app/data/:
 #   world.anag.gz      all names and countries of name_dataset (world mixture; a search in one country keeps the
 #                      names seen in it)
-#   FR-insee.anag.gz   France from INSEE: first names given 1900-2022, last names of people born 1891-2000
 #   world.names/       the display forms, people per country and vectors of the names of the world pack, in
 #                      chunks of 1024 names: a search reads the chunks of the names it finds in the trie
 #   world.real/        the real full names of the world pack, with their people per country, in 4096 parts
 #   <pack>.check.json  log p of sample names computed with pairmodel.py, to test the apps
-# Run: caffeinate -i .venv/bin/python export_app.py [--packs world FR-insee]   (both: about 7 min)
+# Run: caffeinate -i .venv/bin/python export_app.py   (about 9 min)
 #
 # The only count filter is the one of the data (prepare_world.py, data/filter.json, metadata min_first and
 # min_last): the names with fewer people in the world are not in the model. The world pack keeps all the names of
 # the model, and all the full names of name_dataset with their people per country.
 #
-# The name_dataset packs use the world model with the counts of all people (train + valid + test). Its log Z_c
-# for these counts takes one exact pass on the GPU (about 4 min), kept in <model>_logz_all_<data dir>.npy.
-# INSEE has no pairs of names: the FR-insee pack takes the name frequencies from INSEE and the interaction
-# u_f . v_l from the FR-only model (better on France than the world model), with its own log Z.
+# The pack uses the world model with the counts of all people (train + valid + test). Its log Z_c for these
+# counts takes one exact pass on the GPU (about 4 min), kept in <model>_logz_all_<data dir>.npy.
 # A pack contains a subset of the names and countries of a model. The score of a name pair in a pack is its
 # score in the full model.
 # The world mixture weights each country by its population (population.tsv, metadata "population"), not by its
@@ -48,12 +45,9 @@
 #   side.vec      1 bit per name, most significant bit first: the name has a vector
 #   side.codes    u8 (names with a vector, groups): product-quantization codes
 #   side.books    f32 (groups, 256, group size): the vector is books[j, codes[j]] for each group j
-# In the world pack, side.names, entries, country, count, vec and codes are in the chunk files (side metadata
-# "chunk": names per chunk) world.names/<side>/<chunk>.gz, chunk in 4 hexadecimal digits: the gzip of 6 varints
-# (the length of each of these sections for the names of the chunk), then the 6 sections.
-# and for the real full names of a pack of one country (FR-insee), in increasing order of first id * n_last + last id:
-#   pairs.key     varint per full name: increase of this key from the previous full name (from 0)
-#   pairs.count   varint per full name: people with it
+# side.names, entries, country, count, vec and codes are in the chunk files (side metadata "chunk": names per chunk)
+# world.names/<side>/<chunk>.gz, chunk in 4 hexadecimal digits: the gzip of 6 varints (the length of each of these
+# sections for the names of the chunk), then the 6 sections.
 #
 # Parts of a world pack. The part of a set of letters is the sum of part_hash[letter] over its letters, modulo
 # parts (metadata). The anagrams of a query have the letters of the query: they are all in its part. The part of
@@ -76,7 +70,6 @@ import time
 import unicodedata
 from collections import Counter
 
-import mlx.core as mx
 import numpy as np
 from unidecode import unidecode
 
@@ -84,8 +77,6 @@ import namedata
 import pairmodel as pm
 
 WORLD_MODEL = "models/fr_insee/world_all_k16_wd0.1_u0_me20_s10000_gates_pool4096_cal_pq2.npz"  # France: INSEE base
-FR_MODEL = "models/country_FR_k16_wd0.1_u0_me0_s5000_pq2.npz"
-INSEE_FIRST, INSEE_LAST = "nat2022.csv", "noms2008nat_txt.txt"
 POPULATION = "population.tsv"
 VERSION = 1
 PARTS = 4096  # parts of the real full names of a world pack
@@ -166,7 +157,7 @@ class Names:
         self.ptr, self.country, self.count = ptr, country, count
         self.vec_row, self.codes, self.books = vec_row, codes, books
 
-    def pack(self, side, countries, alphabet, chunk_dir=None):
+    def pack(self, side, countries, alphabet, chunk_dir):
         """Sections of the names seen in the given countries (model country indices). Returns the sections, the side
         metadata and the model id of each pack name. With chunk_dir, the display forms, the people per country and
         the vectors are in the chunk files chunk_dir/<side>/<chunk>.gz instead."""
@@ -197,12 +188,11 @@ class Names:
         }
         meta = {"names": len(ids), "nodes": len(letters), "vectors": int((rows >= 0).sum()),
                 "groups": self.books.shape[0], "group_size": self.books.shape[2]}
-        if chunk_dir:
-            for k in CHUNK_SECTIONS:
-                del sections[k]
-            write_chunks(f"{chunk_dir}/{side}", [self.displays[i] for i in ids], lens, country[cells], count[cells],
-                         rows, self.codes)
-            meta["chunk"] = CHUNK
+        for k in CHUNK_SECTIONS:
+            del sections[k]
+        write_chunks(f"{chunk_dir}/{side}", [self.displays[i] for i in ids], lens, country[cells], count[cells],
+                     rows, self.codes)
+        meta["chunk"] = CHUNK
         return {f"{side}.{k}": v for k, v in sections.items()}, meta, ids
 
 
@@ -239,11 +229,6 @@ def pack_pairs(f, l, count, ids, country=None):
     country = np.zeros(len(key), np.int64) if country is None else np.asarray(country)[ok]
     order = np.lexsort((country, key))
     return key[order], np.asarray(count)[ok][order], country[order]
-
-
-def pair_sections(key, count):
-    """Sections of the real full names of a pack of one country."""
-    return {"pairs.key": varints(np.diff(key, prepend=0)), "pairs.count": varints(count)}
 
 
 def check_rows(key, count, n_first, n_last, rng, n=50):
@@ -384,78 +369,8 @@ def world_references(model, ds, log_z, pop):
     return references
 
 
-def insee_counts(path, last):
-    """{key: (display form, people)} from an INSEE file. The display form is the most frequent spelling."""
-    forms = {}
-    lines = open(path, encoding="utf-8").read().splitlines()[1:]
-    for line in lines:
-        if last:
-            name, *n = line.rsplit(None, 11)
-        else:
-            _, name, _, n = line.split(";")
-            n = [n]
-        if name.startswith("_") or name == "AUTRES NOMS":  # rare names grouped together
-            continue
-        k = key_of(name)
-        if len(k) >= 2:
-            forms.setdefault(k, Counter())[name] += sum(map(int, n))
-    return {k: (c.most_common(1)[0][0].title(), sum(c.values())) for k, c in forms.items()}
-
-
-def export_insee(out_dir, letters, data_dir, rng, alphabet):
-    """France with the INSEE name frequencies and the interaction of the FR-only model."""
-    d = np.load(FR_MODEL)
-    ds = namedata.load(data_dir, drop=False)
-    fr = ds.c == ds.countries.index("FR")
-    sections, meta, X, W, pack_ids, insee_of_world = {}, {}, {}, {}, {}, {}
-    for side, path, vec, ids_all in (("first", INSEE_FIRST, "U", ds.f), ("last", INSEE_LAST, "V", ds.l)):
-        counts = insee_counts(path, side == "last")
-        keys = sorted(counts)
-        people = np.array([counts[k][1] for k in keys])
-        # model row of each INSEE name: world id (same key) -> row in the FR model (names of the FR train split)
-        world_key = [line.split("\t", 1)[0] for line in open(f"{data_dir}/vocab_{side}.tsv", encoding="utf-8")]
-        world_id = {k: i for i, k in enumerate(world_key)}
-        seen = np.bincount(ids_all[fr], weights=ds.n_train[fr], minlength=len(world_key)) > 0
-        fr_row = np.where(seen, np.cumsum(seen) - 1, -1)
-        n_model = int(seen.sum())
-        model_row = np.array([fr_row[world_id[k]] if k in world_id else -1 for k in keys])
-        insee_of_world[side] = np.full(len(world_key), -1)
-        insee_of_world[side][[world_id[k] for k in keys if k in world_id]] = [i for i, k in enumerate(keys) if k in world_id]
-        names = Names(keys, [counts[k][0] for k in keys], people, np.arange(len(keys) + 1),
-                      np.zeros(len(keys), np.uint8), people, np.where(model_row >= 0, vector_rows(d, vec, n_model)[model_row], -1),
-                      d[f"{vec}_codes"], d[f"{vec}_codebooks"])
-        s, meta[side], ids = names.pack(side, [0], alphabet)
-        sections.update(s)
-        pack_ids[side] = ids
-        meta[side].update(people=[int(people.sum())], prior_norm=float(people.sum() + 0.5 * len(keys)))
-        X[side] = np.log(people[ids] / people.sum())
-        W[side] = np.where(names.vec_row[ids, None] >= 0, pm.dequantize(d, vec, n_model)[np.maximum(model_row[ids], 0)], 0)
-        print(f"FR-insee {side}: {len(keys):,} names, {(model_row >= 0).sum():,} in the FR model", flush=True)
-
-    n = (ds.n_train + ds.n_valid + ds.n_test)[fr]
-    f, l = insee_of_world["first"][ds.f[fr]], insee_of_world["last"][ds.l[fr]]
-    ok = (f >= 0) & (l >= 0)
-    key, count, _ = pack_pairs(f[ok], l[ok], n[ok], pack_ids)
-    sections.update(pair_sections(key, count))
-    n_pairs = len(key)
-    check_real = check_rows(key, count, len(pack_ids["first"]), len(pack_ids["last"]), rng)
-    U, V = W["first"], W["last"]
-    log_z = float(np.array(pm.log_partition(*(mx.array(a.astype(np.float32)) for a in (
-        X["first"][:, None], X["last"][:, None], U, V))))[0])
-    write_pack(f"{out_dir}/FR-insee.anag.gz", dict(
-        version=VERSION, source="INSEE", model=os.path.basename(FR_MODEL), countries=["FR"], people=meta["first"]["people"],
-        population=population(["FR"]).tolist(), alpha=0.0, log_z=[log_z], gates=[[1.0] * U.shape[1]], offsets=[0.0],
-        letters=letters, alphabet=alphabet, pairs=n_pairs, **meta), sections)
-    f, l = rng.integers(0, len(U), 300), rng.integers(0, len(V), 300)
-    lp = X["first"][f] + X["last"][l] + (U[f] * V[l]).sum(1) - log_z
-    rows = [dict(first=int(a), last=int(b), country="FR", log_p=float(v)) for a, b, v in zip(f, l, lp)]
-    json.dump({"country": rows, "real": check_real}, open(f"{out_dir}/FR-insee.check.json", "w"))
-    print(f"FR-insee: {n_pairs:,} real full names", flush=True)
-
-
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--packs", nargs="*", default=["world", "FR-insee"], help="world, FR-insee (default: both)")
     parser.add_argument("--data-dir", default="data_fr_insee", help="data/: France with the base of name_dataset")
     parser.add_argument("--world-model", default=WORLD_MODEL)
     parser.add_argument("--out-dir", default="app/data")
@@ -465,15 +380,9 @@ def main():
     letters = letter_rules()
     rng = np.random.default_rng(0)
     ds = namedata.load(args.data_dir, drop=False)  # all the people: the real full names do not change
-    packs = args.packs
     data_filter = json.load(open(f"{args.data_dir}/filter.json"))  # min_first, min_last of prepare_world.py
     alphabet = letter_order([line.split("\t", 1)[0] for side in ("first", "last")
                              for line in open(f"{args.data_dir}/vocab_{side}.tsv", encoding="utf-8")])
-
-    if "FR-insee" in packs:
-        export_insee(args.out_dir, letters, args.data_dir, rng, alphabet)
-    if "world" not in packs:
-        return
     ds.n_train = ds.n_train + ds.n_valid + ds.n_test  # all people (pm.support and log_marginals read n_train)
     d = np.load(args.world_model)
     names = world_names(ds, d, args.data_dir)

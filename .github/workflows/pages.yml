@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DATA_TAG: data-v2
+  DATA_TAG: data-v3
 
 jobs:
   test:

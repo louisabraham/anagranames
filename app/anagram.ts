@@ -44,7 +44,7 @@ interface SideMeta {
   scale?: number[]; // per country: the model uses count * scale (1, or for a country with a base, see export_app.py)
   groups: number;
   group_size: number;
-  chunk?: number; // world pack: names per chunk file
+  chunk: number; // names per chunk file
 }
 
 interface Meta {
@@ -61,9 +61,8 @@ interface Meta {
   alphabet: string; // the 26 letters in the order of the signatures, the rarest first
   min_first?: number; // the count filter of the data (prepare_world.py): people with a name in the world
   min_last?: number;
-  pairs: number;
-  parts?: number; // world packs: the real full names are in parts (export_app.py)
-  part_hash?: number[];
+  parts: number; // the real full names are in parts (export_app.py)
+  part_hash: number[];
   sections: Record<string, [number, number]>;
   first: SideMeta;
   last: SideMeta;
@@ -179,15 +178,15 @@ class Chunk {
   }
 }
 
-/** The first or the last names of a pack: signature trie, people, and the data of the names in chunks (one chunk
- * for all names, or chunk files of the world pack read with Model.addChunk). */
+/** The first or the last names of a pack: signature trie, people, and the data of the names in chunk files (read
+ * with Model.addChunk). */
 class Side {
   readonly n: number;
   readonly letters: Uint8Array; // index of the letter of each node in the pack alphabet
   readonly end: Uint32Array; // first node after the subtree
   readonly nameStart: Uint32Array; // names of node i: nameStart[i] to nameStart[i + 1] - 1
   readonly total: Float64Array; // people in the model data
-  readonly part: Uint16Array | null = null; // world packs: the sum of part_hash over the letters, modulo parts
+  readonly part: Uint16Array; // the sum of part_hash over the letters, modulo parts
   readonly chunkSize: number;
   readonly chunks: (Chunk | undefined)[];
   private readonly alphaPrior: Float64Array; // alpha pi
@@ -209,23 +208,21 @@ class Side {
     this.nameStart = new Uint32Array(m.nodes + 1);
     for (let i = 0; i < m.nodes; i++) this.nameStart[i + 1] = this.nameStart[i] + ends[i];
 
-    this.chunkSize = m.chunk ?? Math.max(n, 1);
-    this.chunks = m.chunk ? new Array(Math.ceil(n / m.chunk)) : [new Chunk(n, CHUNK_SECTIONS.map(get))];
+    this.chunkSize = m.chunk;
+    this.chunks = new Array(Math.ceil(n / m.chunk));
     this.total = varints(get("total"), new Float64Array(n));
     this.alphaPrior = this.total.map((t) => (meta.alpha * (t + 0.5)) / m.prior_norm);
-    if (meta.parts && meta.part_hash) {
-      this.part = new Uint16Array(n);
-      const ends: number[] = [], sums: number[] = []; // the nodes from the root to node i
-      for (let i = 0; i < m.nodes; i++) {
-        while (ends.length && ends[ends.length - 1] <= i) {
-          ends.pop();
-          sums.pop();
-        }
-        const sum = (sums.length ? sums[sums.length - 1] : 0) + meta.part_hash[meta.alphabet.charCodeAt(this.letters[i]) - 65];
-        ends.push(this.end[i]);
-        sums.push(sum);
-        this.part.fill(sum % meta.parts, this.nameStart[i], this.nameStart[i + 1]);
+    this.part = new Uint16Array(n);
+    const pathEnd: number[] = [], pathSum: number[] = []; // the nodes from the root to node i
+    for (let i = 0; i < m.nodes; i++) {
+      while (pathEnd.length && pathEnd[pathEnd.length - 1] <= i) {
+        pathEnd.pop();
+        pathSum.pop();
       }
+      const sum = (pathSum.length ? pathSum[pathSum.length - 1] : 0) + meta.part_hash[meta.alphabet.charCodeAt(this.letters[i]) - 65];
+      pathEnd.push(this.end[i]);
+      pathSum.push(sum);
+      this.part.fill(sum % meta.parts, this.nameStart[i], this.nameStart[i + 1]);
     }
     this.logNorm = Float64Array.from(m.people, (p) => Math.log(p + meta.alpha));
     this.scale = Float64Array.from(m.scale ?? m.people.map(() => 1));
@@ -303,9 +300,7 @@ export class Model {
   readonly last: Side;
   readonly minFirst: number; // the data keeps the first names of at least minFirst people in the world
   readonly minLast: number;
-  private readonly pairKey: Float64Array; // first id * number of last names + last id, increasing
-  private readonly pairCount: Float64Array;
-  readonly parts: number; // parts of the real full names, 0 when they are in the pack
+  readonly parts: number; // parts of the real full names
   private readonly partHash: number[];
   private readonly partCache = new Map<number, Map<number, RealName>>(); // part -> key -> people
   private classes: { byRank: Uint32Array; byClass: Uint32Array; classStart: Uint32Array } | null = null;
@@ -349,12 +344,8 @@ export class Model {
     this.baseSum = this.baseScaled.reduce((s, x) => s + x, 0);
     this.minFirst = meta.min_first ?? 0;
     this.minLast = meta.min_last ?? 0;
-    this.parts = meta.parts ?? 0;
-    this.partHash = meta.part_hash ?? [];
-    const pairs = this.parts ? 0 : meta.pairs;
-    this.pairKey = pairs ? varints(section("pairs.key"), new Float64Array(pairs)) : new Float64Array(0);
-    for (let i = 1; i < pairs; i++) this.pairKey[i] += this.pairKey[i - 1];
-    this.pairCount = pairs ? varints(section("pairs.count"), new Float64Array(pairs)) : new Float64Array(0);
+    this.parts = meta.parts;
+    this.partHash = meta.part_hash;
   }
 
   /** The model of a pack file. */
@@ -385,9 +376,8 @@ export class Model {
     return f.x[c] + l.x[c] + inter - this.logZ[c];
   }
 
-  /** The part of the real full names with the letters of the query; null when the pack has no parts. */
-  partOf(query: string): number | null {
-    if (!this.parts) return null;
+  /** The part of the real full names with the letters of the query. */
+  partOf(query: string): number {
     let sum = 0;
     for (const ch of this.key(query)) sum += this.partHash[ch.charCodeAt(0) - 65];
     return sum % this.parts;
@@ -395,7 +385,7 @@ export class Model {
 
   /** The part of the full name (f, l). */
   pairPart(f: number, l: number): number {
-    return (this.first.part![f] + this.last.part![l]) % this.parts;
+    return (this.first.part[f] + this.last.part[l]) % this.parts;
   }
 
   /** The file of part j in the directory <pack>.real/ */
@@ -415,7 +405,7 @@ export class Model {
     const v = varints(bytes, new Float64Array(n));
     if (!this.classes) {
       const byRank = mostFirst(this.first.total);
-      const part = this.last.part!;
+      const part = this.last.part;
       const classStart = new Uint32Array(this.parts + 1);
       for (let l = 0; l < part.length; l++) classStart[part[l] + 1]++;
       for (let c = 0; c < this.parts; c++) classStart[c + 1] += classStart[c];
@@ -431,7 +421,7 @@ export class Model {
       if (i === 1 || v[i] > 0) [row, col] = [row + v[i], v[i + 1]];
       else col += 1 + v[i + 1];
       const f = byRank[row];
-      const l = byClass[classStart[(j - this.first.part![f] + this.parts) % this.parts] + col];
+      const l = byClass[classStart[(j - this.first.part[f] + this.parts) % this.parts] + col];
       const name: RealName = { people: 0, countries: [] };
       for (let k = 0, c = -1; k <= v[i + 2]; k++, e += 2) {
         c += v[e] + 1;
@@ -463,28 +453,14 @@ export class Model {
 
   /** [country, people] of the full name (f, l) in the pack countries (or in pack country c), most people first. */
   realCountries(f: number, l: number, c = -1): [string, number][] {
-    if (!this.parts) {
-      const n = this.real(f, l);
-      return n ? [[this.countries[0], n]] : [];
-    }
     return this.byPeople((this.realName(f, l)?.countries ?? []).filter(([k]) => c < 0 || k === c));
   }
 
-  /** People with the full name (f, l) in the pack countries (0: none). With parts, the part of (f, l) must be
-   * read first (addPart). */
+  /** People with the full name (f, l) in the pack countries, or in pack country c (0: none). The part of (f, l)
+   * must be read first (addPart). */
   real(f: number, l: number, c = -1): number {
-    if (this.parts) {
-      const name = this.realName(f, l);
-      return c < 0 ? (name?.people ?? 0) : (name?.countries.find(([k]) => k === c)?.[1] ?? 0);
-    }
-    const k = f * this.last.n + l;
-    let lo = 0, hi = this.pairKey.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (this.pairKey[mid] < k) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo < this.pairKey.length && this.pairKey[lo] === k ? this.pairCount[lo] : 0;
+    const name = this.realName(f, l);
+    return c < 0 ? (name?.people ?? 0) : (name?.countries.find(([k]) => k === c)?.[1] ?? 0);
   }
 
   /** The number of each letter of a key, in the order of the pack alphabet. */
@@ -521,7 +497,7 @@ export class Model {
   }
 
   /** The chunks to read (addChunk) before a search of the query: those of the anagrams and of the names of
-   * the query. Empty for a pack without chunk files. */
+   * the query. */
   need(query: string): [string, number][] {
     const [fs, ls] = this.anagrams(query);
     const out = this.needIds("last", ls, this.needIds("first", fs));
@@ -689,7 +665,6 @@ export class Model {
   /** The anagrams of the query, scored and sorted (the real full names first), and the result of one of them. */
   private ranked(query: string, country: string | null) {
     let [fs, ls] = this.anagrams(query);
-    if (country === null && this.countries.length === 1) country = this.countries[0];
     const c = country === null ? -1 : this.countries.indexOf(country);
     if (country !== null && c < 0) throw new Error(`country ${country} is not in the pack`);
     const firsts = new Map<number, Entry>(), lasts = new Map<number, Entry>();
@@ -698,13 +673,12 @@ export class Model {
       if (!e) cache.set(id, (e = side.entry(id)));
       return e;
     };
-    if (c >= 0 && this.countries.length > 1) { // a country of the world: the anagrams of the names seen in it
+    if (c >= 0) { // a country: the anagrams of the names seen in it
       const keep = fs.map((f, i) => get(this.first, firsts, f).seen[c] && get(this.last, lasts, ls[i]).seen[c]);
       [fs, ls] = [fs.filter((_, i) => keep[i]), ls.filter((_, i) => keep[i])];
     }
-    const k = this.countries.length > 1 ? c : -1; // the country of the people (-1: all the pack)
-    let real = Float64Array.from(fs, (f, i) => this.real(f, ls[i], k));
-    if (k >= 0) { // a country of the world: a synthetic name has no real person anywhere (else it is real elsewhere)
+    let real = Float64Array.from(fs, (f, i) => this.real(f, ls[i], c));
+    if (c >= 0) { // a country: a synthetic name has no real person anywhere (else it is real elsewhere)
       const keep = fs.map((f, i) => real[i] > 0 || this.real(f, ls[i], -1) === 0);
       [fs, ls, real] = [fs.filter((_, i) => keep[i]), ls.filter((_, i) => keep[i]), real.filter((_, i) => keep[i])];
     }
@@ -725,10 +699,10 @@ export class Model {
       logP: lp[i],
       real: real[i],
       firstPeople: this.first.total[fs[i]],
-      firstCountries: this.nameCountries("first", fs[i], k),
+      firstCountries: this.nameCountries("first", fs[i], c),
       lastPeople: this.last.total[ls[i]],
-      lastCountries: this.nameCountries("last", ls[i], k),
-      realCountries: this.realCountries(fs[i], ls[i], k),
+      lastCountries: this.nameCountries("last", ls[i], c),
+      realCountries: this.realCountries(fs[i], ls[i], c),
     });
     const realNames = real.reduce((s, x) => s + (x > 0 ? 1 : 0), 0);
     const realPeople = real.reduce((s, x) => s + x, 0);
@@ -744,7 +718,7 @@ export class Model {
       for (let i = 0; i < fs.length; i++) {
         if (!(real[i] > 0)) continue;
         const f = get(this.first, firsts, fs[i]), l = get(this.last, lasts, ls[i]);
-        for (const [cc, x] of this.realCountries(fs[i], ls[i], k)) {
+        for (const [cc, x] of this.realCountries(fs[i], ls[i], c)) {
           const j = index.get(cc)!;
           people[j] += x;
           if (expected) synthetic[j] += Math.exp(this.logW[j] + this.logP(f, l, j)); // real there: the model too
