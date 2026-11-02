@@ -858,57 +858,6 @@ main.how {
 .how b {
   color: var(--white);
 }
-.how .flow { /* the data, step by step */
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
-  gap: 2px;
-  margin: 40px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.how .flow li {
-  margin: 0;
-  padding: 16px 14px;
-  border-top: 1px solid var(--phos);
-  background: rgba(0, 255, 229, 0.04);
-  font: 13px/1.4 var(--mono);
-  color: var(--muted);
-}
-.flow b {
-  display: block;
-  margin-bottom: 6px;
-  font: clamp(20px, 2.2vw, 28px) var(--mono);
-  color: var(--white);
-  text-shadow: var(--glow);
-}
-.pair,
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
-  gap: 12px;
-  margin: 8px 0 20px;
-}
-.pair div,
-.tiles div {
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-}
-.pair b,
-.tiles b {
-  display: block;
-  margin-bottom: 4px;
-  font: 17px var(--mono);
-  text-transform: uppercase;
-  color: var(--phos);
-}
-.tiles b {
-  font-size: 30px;
-}
-.pair span,
-.tiles span {
-  font: 15px/1.5 var(--sans);
-  color: var(--muted);
-}
 .steps {
   width: 100%;
   border-collapse: collapse;
@@ -936,30 +885,6 @@ main.how {
 .steps th.num {
   white-space: normal; /* long titles of columns: on two lines on a phone */
 }
-details {
-  margin: 8px 0 20px;
-  padding: 0 0 0 16px;
-  border-left: 1px solid var(--phos);
-  overflow-x: auto; /* a formula wider than the screen scrolls in its box */
-}
-summary {
-  cursor: pointer;
-  font-size: 13px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--phos);
-}
-details[open] summary {
-  margin-bottom: 12px;
-}
-details p {
-  font-size: 16px !important;
-}
-.refs p {
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--muted);
-}
 .katex-display {
   max-width: 100%;
   overflow-x: auto;
@@ -981,14 +906,9 @@ details p {
     width: 44px;
     height: 44px;
   }
-  .how a,
-  summary {
+  .how a {
     display: inline-block;
     padding: 9px 0;
-  }
-  summary {
-    display: list-item;
-    padding: 12px 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -125,8 +125,7 @@ def main():
     U, V = np.array(base.U), np.array(base.V)
     k = U.shape[1]
     rf, rl = np.nonzero(np.abs(U).sum(1) > 0)[0], np.nonzero(np.abs(V).sum(1) > 0)[0]
-    cf = np.bincount(ds.f, weights=ds.n_train, minlength=ds.n_first)[rf]
-    cl = np.bincount(ds.l, weights=ds.n_train, minlength=ds.n_last)[rl]
+    cf, cl = (x[r] for x, r in zip(namedata.people(ds), (rf, rl)))
     n_names = len(rf) + len(rl)
     country_bytes = 0 if base.G is None else base.G.size * 4 + (0 if base.B is None else base.B.size * 4)
 

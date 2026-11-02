@@ -41,6 +41,7 @@ interface SideMeta {
   nodes: number;
   people: number[];
   prior_norm: number;
+  scale?: number[]; // per country: the model uses count * scale (1, or for a country with a base, see export_app.py)
   groups: number;
   group_size: number;
   chunk?: number; // world pack: names per chunk file
@@ -71,6 +72,7 @@ interface Meta {
 interface Entry {
   x: Float64Array; // X[id, c] for all pack countries
   seen: Uint8Array; // 1 if the name is seen in country c
+  inS: Uint8Array; // 1 if the pair term applies in country c: the name has people there (count > 0)
   countries: Uint8Array; // the countries where the name is seen, increasing
   a: number; // log(alpha pi): X[id, c] + log(N_c + alpha) where the name is not seen
   vec: Float64Array | null; // null for names without a vector (the null score)
@@ -190,6 +192,7 @@ class Side {
   readonly chunks: (Chunk | undefined)[];
   private readonly alphaPrior: Float64Array; // alpha pi
   readonly logNorm: Float64Array; // log(N_c + alpha)
+  private readonly scale: Float64Array; // per country: people of the model per count
   private readonly books: Float32Array;
   private readonly groups: number;
   private readonly groupSize: number;
@@ -225,6 +228,7 @@ class Side {
       }
     }
     this.logNorm = Float64Array.from(m.people, (p) => Math.log(p + meta.alpha));
+    this.scale = Float64Array.from(m.scale ?? m.people.map(() => 1));
     this.books = f32(get("books"));
     this.groups = m.groups;
     this.groupSize = m.group_size;
@@ -271,23 +275,24 @@ class Side {
     const C = this.logNorm.length;
     const a = this.alphaPrior[id];
     const x = new Float64Array(C);
-    const seen = new Uint8Array(C);
+    const seen = new Uint8Array(C), inS = new Uint8Array(C);
     for (let c = 0; c < C; c++) x[c] = Math.log(a) - this.logNorm[c]; // -Infinity when alpha = 0
     for (let e = k.ptr[i]; e < k.ptr[i + 1]; e++) {
       const c = k.country[e];
-      x[c] = Math.log(k.count[e] + a) - this.logNorm[c];
+      x[c] = Math.log(k.count[e] * this.scale[c] + a) - this.logNorm[c];
       seen[c] = 1;
+      inS[c] = k.count[e] > 0 ? 1 : 0;
     }
     const countries = k.country.subarray(k.ptr[i], k.ptr[i + 1]);
     const r = k.row[i];
-    if (r < 0) return { x, seen, countries, a: Math.log(a), vec: null };
+    if (r < 0) return { x, seen, inS, countries, a: Math.log(a), vec: null };
     const g = this.groupSize;
     const vec = new Float64Array(this.groups * g);
     for (let j = 0; j < this.groups; j++) {
       const at = (j * 256 + k.codes[r * this.groups + j]) * g;
       for (let t = 0; t < g; t++) vec[j * g + t] = this.books[at + t];
     }
-    return { x, seen, countries, a: Math.log(a), vec };
+    return { x, seen, inS, countries, a: Math.log(a), vec };
   }
 }
 
@@ -372,7 +377,7 @@ export class Model {
   /** log p(f, l | c) */
   logP(f: Entry, l: Entry, c: number): number {
     let inter = 0;
-    if (f.seen[c] && l.seen[c]) {
+    if (f.inS[c] && l.inS[c]) {
       let s = 0;
       if (f.vec && l.vec) for (let j = 0; j < this.k; j++) s += f.vec[j] * l.vec[j] * this.gates[c * this.k + j];
       inter = s + this.offsets[c];

@@ -13,7 +13,7 @@
 # the model, and all the full names of name_dataset with their people per country.
 #
 # The name_dataset packs use the world model with the counts of all people (train + valid + test). Its log Z_c
-# for these counts takes one exact pass on the GPU (about 4 min), kept in <model>_logz_all.npy.
+# for these counts takes one exact pass on the GPU (about 4 min), kept in <model>_logz_all_<data dir>.npy.
 # INSEE has no pairs of names: the FR-insee pack takes the name frequencies from INSEE and the interaction
 # u_f . v_l from the FR-only model (better on France than the world model), with its own log Z.
 # A pack contains a subset of the names and countries of a model. The score of a name pair in a pack is its
@@ -40,7 +40,11 @@
 #   side.total    varint per name: people in the model data (prior pi of the model)
 #   side.entries  varint per name: pack countries where the name is seen
 #   side.country  u8 per entry: index in the pack countries, increasing within a name
-#   side.count    varint per entry: people with this name in this country
+#   side.count    varint per entry: people with this name in this country. For a country of metadata "bases"
+#                 (France: INSEE), the people of the base: its entries are the names of the base and the names seen
+#                 in it in name_dataset (0 when not in the base). The model uses count * scale[c] (side metadata
+#                 "scale": 1, or the people of the country in name_dataset per person of the base), and the pair
+#                 term applies to the names of count > 0.
 #   side.vec      1 bit per name, most significant bit first: the name has a vector
 #   side.codes    u8 (names with a vector, groups): product-quantization codes
 #   side.books    f32 (groups, 256, group size): the vector is books[j, codes[j]] for each group j
@@ -79,7 +83,7 @@ from unidecode import unidecode
 import namedata
 import pairmodel as pm
 
-WORLD_MODEL = "models/world_all_k16_wd0.1_u0_me20_s10000_gates_pool4096_cal_pq2.npz"
+WORLD_MODEL = "models/fr_insee/world_all_k16_wd0.1_u0_me20_s10000_gates_pool4096_cal_pq2.npz"  # France: INSEE base
 FR_MODEL = "models/country_FR_k16_wd0.1_u0_me0_s5000_pq2.npz"
 INSEE_FIRST, INSEE_LAST = "nat2022.csv", "noms2008nat_txt.txt"
 POPULATION = "population.tsv"
@@ -177,8 +181,7 @@ class Names:
         ptr = np.searchsorted(local[owner[sel]], np.arange(len(ids) + 1))
         country, count = pack_index[self.country[sel]], self.count[sel]
 
-        people = np.diff(np.concatenate([[0], np.cumsum(count)])[ptr])
-        order, letters, sizes, ends = signature_trie([self.keys[i] for i in ids], people, [self.displays[i] for i in ids],
+        order, letters, sizes, ends = signature_trie([self.keys[i] for i in ids], self.total[ids], [self.displays[i] for i in ids],
                                                      alphabet)
         lens = np.diff(ptr)[order]
         cells = ranges(ptr[:-1][order], lens)
@@ -318,17 +321,24 @@ def vector_rows(d, name, n):
 
 
 def world_names(ds, d, data_dir):
-    """Names of both sides of the world model, with the counts of ds.n_train."""
+    """Names of both sides of the world model, with the counts of ds.n_train. A country with a base (ds.base: INSEE
+    for France) has the people of its base instead, and its names are the names of the base and the names seen in it
+    in the data (people 0 when not in the base)."""
     out = {}
-    for side, ids, n, vec in (("first", ds.f, ds.n_first, "U"), ("last", ds.l, ds.n_last, "V")):
+    for s, (side, ids, n, vec) in enumerate((("first", ds.f, ds.n_first, "U"), ("last", ds.l, ds.n_last, "V"))):
         vocab = [line.split("\t") for line in open(f"{data_dir}/vocab_{side}.tsv", encoding="utf-8").read().split("\n")[:-1]]
-        dense = np.bincount(ids.astype(np.int64) * ds.C + ds.c, weights=ds.n_train, minlength=n * ds.C)
-        cells = np.nonzero(dense)[0]
+        dense = np.bincount(ids.astype(np.int64) * ds.C + ds.c, weights=ds.n_train, minlength=n * ds.C).reshape(n, ds.C)
+        total = dense.sum(1)
+        present = dense > 0
+        for c, counts in ds.base.items():
+            present[:, c] |= counts[s] > 0
+            dense[:, c] = counts[s]
+        cells = np.nonzero(present.reshape(-1))[0]
         ptr = np.searchsorted(cells // ds.C, np.arange(n + 1))
         out[side] = Names([v[0] for v in vocab], [v[1] for v in vocab], [int(v[2]) for v in vocab], ptr,
-                          (cells % ds.C).astype(np.uint8), dense[cells].astype(np.int64),
+                          (cells % ds.C).astype(np.uint8), dense.reshape(-1)[cells].astype(np.int64),
                           vector_rows(d, vec, n), d[f"{vec}_codes"], d[f"{vec}_codebooks"])
-        assert np.array_equal(np.diff(np.concatenate([[0], np.cumsum(out[side].count)])[ptr]), out[side].total)
+        assert np.array_equal(total, out[side].total)
     return out
 
 
@@ -395,7 +405,7 @@ def insee_counts(path, last):
 def export_insee(out_dir, letters, data_dir, rng, alphabet):
     """France with the INSEE name frequencies and the interaction of the FR-only model."""
     d = np.load(FR_MODEL)
-    ds = namedata.load(data_dir)
+    ds = namedata.load(data_dir, drop=False)
     fr = ds.c == ds.countries.index("FR")
     sections, meta, X, W, pack_ids, insee_of_world = {}, {}, {}, {}, {}, {}
     for side, path, vec, ids_all in (("first", INSEE_FIRST, "U", ds.f), ("last", INSEE_LAST, "V", ds.l)):
@@ -446,14 +456,15 @@ def export_insee(out_dir, letters, data_dir, rng, alphabet):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--packs", nargs="*", default=["world", "FR-insee"], help="world, FR-insee (default: both)")
-    parser.add_argument("--data-dir", default="data")
+    parser.add_argument("--data-dir", default="data_fr_insee", help="data/: France with the base of name_dataset")
+    parser.add_argument("--world-model", default=WORLD_MODEL)
     parser.add_argument("--out-dir", default="app/data")
     args = parser.parse_args()
     t0 = time.time()
     os.makedirs(args.out_dir, exist_ok=True)
     letters = letter_rules()
     rng = np.random.default_rng(0)
-    ds = namedata.load(args.data_dir)
+    ds = namedata.load(args.data_dir, drop=False)  # all the people: the real full names do not change
     packs = args.packs
     data_filter = json.load(open(f"{args.data_dir}/filter.json"))  # min_first, min_last of prepare_world.py
     alphabet = letter_order([line.split("\t", 1)[0] for side in ("first", "last")
@@ -464,10 +475,10 @@ def main():
     if "world" not in packs:
         return
     ds.n_train = ds.n_train + ds.n_valid + ds.n_test  # all people (pm.support and log_marginals read n_train)
-    d = np.load(WORLD_MODEL)
+    d = np.load(args.world_model)
     names = world_names(ds, d, args.data_dir)
-    model = pm.load_counts(WORLD_MODEL, ds, False)
-    cache = os.path.splitext(WORLD_MODEL)[0] + "_logz_all.npy"
+    model = pm.load_counts(args.world_model, ds, False)
+    cache = f"{os.path.splitext(args.world_model)[0]}_logz_all_{os.path.basename(os.path.normpath(args.data_dir))}.npy"
     if not os.path.exists(cache):
         np.save(cache, np.array(pm.log_partition_restricted(model, ds), np.float64))
     log_z = np.load(cache)
@@ -482,7 +493,11 @@ def main():
         s, meta[side], ids[side] = names[side].pack(side, cs, alphabet, f"{args.out_dir}/world.names")
         sections.update(s)
         n_all = len(names[side].total)
-        meta[side].update(people=people.tolist(), prior_norm=float(names[side].total.sum() + 0.5 * n_all))
+        scale = np.ones(ds.C)  # people of the base per person of the data: count * scale + alpha pi
+        for c, counts in ds.base.items():
+            scale[c] = people[c] / counts[("first", "last").index(side)].sum()
+        meta[side].update(people=people.tolist(), prior_norm=float(names[side].total.sum() + 0.5 * n_all),
+                          scale=scale.tolist())
     key, count, country = pack_pairs(ds.f, ds.l, ds.n_train, ids, ds.c)
     write_parts(f"{args.out_dir}/world.real", key, count, country, names, ids)
     entries = key, count, country
@@ -494,7 +509,8 @@ def main():
         i, j = np.searchsorted(entries[0], [k, k + 1])
         r["countries"] = [[ds.countries[c], int(x)] for c, x in zip(entries[2][i:j], entries[1][i:j])]
     write_pack(f"{args.out_dir}/world.anag.gz", dict(
-        version=VERSION, source="name_dataset", model=os.path.basename(WORLD_MODEL), countries=ds.countries,
+        version=VERSION, source="name_dataset", model=os.path.basename(args.world_model), countries=ds.countries,
+        bases={ds.countries[c]: "INSEE" for c in ds.base},
         people=people.tolist(), population=pop.tolist(), alpha=float(d["alpha"]), log_z=log_z.tolist(),
         gates=d["G"].astype(np.float64).tolist(), offsets=d["B"].astype(np.float64).tolist(), letters=letters,
         alphabet=alphabet, pairs=len(key), parts=PARTS, part_hash=PART_HASH.tolist(), **data_filter, **meta), sections)

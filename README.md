@@ -8,8 +8,9 @@ Site: https://louisabraham.github.io/anagranames/ · How it works: [web/how.html
 
 ## Layout
 
-- `prepare_world.py`, `training.py`, `calibrate.py`, `export_app.py`: the data and the model, from name_dataset to the
-  packs in `app/data` (not in git: the file `app-data.tar` of the release `data-v1`).
+- `prepare_world.py`, `make_fr_insee.py`, `pairmodel.py`, `calibrate.py`, `quantize.py`, `export_app.py`: the data and
+  the model, from name_dataset and INSEE (the base of France) to the packs in `app/data` (not in git: the file
+  `app-data.tar` of the release `data-v2`).
 - `app/anagram.ts`: the search (the site and the CLI `app/cli.ts`); `app/anagram.py`: the same search in Python, the
   reference of the tests (`app/parity.py`).
 - `web/`: the site; `node web/build.mjs` builds `web/anagram.js` and `web/data`.
@@ -17,7 +18,7 @@ Site: https://louisabraham.github.io/anagranames/ · How it works: [web/how.html
 ## Run
 
 ```sh
-gh release download data-v1 --pattern app-data.tar --output - | tar -x -C app
+gh release download data-v2 --pattern app-data.tar --output - | tar -x -C app
 node web/build.mjs
 python3 -m http.server -d web 8000
 ```

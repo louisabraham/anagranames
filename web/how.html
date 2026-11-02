@@ -7,7 +7,7 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>How it works · ANAGRANAMES</title>
-<meta name="description" content="Where the names come from, how the page finds the anagrams, and how the model gives their probability.">
+<meta name="description" content="The data, the search of the anagrams, the model that ranks them, and how it all fits in a browser.">
 <link rel="stylesheet" href="style.css">
 <!-- Analytics (PostHog), the same as on the rest of louisabraham.github.io: the file /assets/js/ph.js of the main
      site has the key and the settings. A local copy (a file, or a server on this computer, as in web/e2e.py) does not
@@ -33,185 +33,121 @@ document.querySelector('link[href="style.css"]').href = `style.css?v=${version}`
 </header>
 <main class="wrap how">
 <h1>How it works</h1>
-<p class="tagline">from 491 million records to your anagrams.</p>
-
-<ol class="flow" aria-label="The data, step by step">
-  <li><b>491,655,925</b> records in name_dataset, from 105 countries</li>
-  <li><b>352,931,936</b> people kept: Latin script, names of 5 people or more</li>
-  <li><b>5,180,098</b> names: 1,724,039 first names, 3,456,059 last names</li>
-  <li><b>154,775,215</b> real full names, with their people in each country</li>
-  <li><b>A few ms</b> to find the anagrams of your name, in your browser</li>
-</ol>
+<p class="tagline">the data, the search, the model, the files.</p>
 
 <section>
-<h2>What does the page do?</h2>
-<p>You type your name. The page finds the full names (one first name and one last name) that use exactly the
-same letters. For <i>Yuki Tanaka</i>, it finds <i>Yuki Nakata</i>, <i>Tanaka Yuki</i> and 32,432 other
-names.</p>
-<p>The page shows two kinds of people, and a switch chooses one:</p>
-<div class="pair">
-  <div><b>Real people</b><span>People in the data have this full name. The page counts them.</span></div>
-  <div><b>Synthetic people</b><span>Nobody in the data has this full name. A model computes its probability.</span></div>
-</div>
-<p>A globe and a list of the countries show where these people are. A click on a country shows its people only.</p>
-</section>
-
-<section>
-<h2>Where do the names come from?</h2>
-<p>From <b>name_dataset</b> [1]: 491,655,925 records (first name, last name, country) from the Facebook leak of
-2021. We keep the names in Latin script that at least 5 people have in the world. This removes most typing errors
-and fake names. It is the only filter: the page keeps all these names, in each country where they occur.</p>
-<p>The data is a sample of accounts, not a census. One person with two accounts counts two times, and the use of
-Facebook is not the same in all countries. For this reason the page says “at least 41 people”.</p>
-<p>For France, you can also use <b>INSEE</b> [2, 3]: the first names given to the children born in France from 1900
-to 2022 (33,234 names, 86.4 million births), and the last names of the people born in France from 1891 to 2000
-(215,906 names, 68.0 million people). INSEE counts each name alone, so it has no real full names.</p>
-</section>
-
-<section>
-<h2>How does the page find the anagrams?</h2>
-<p>Each name becomes its letters A to Z, without accents, spaces or hyphens: <i>Jean-Paul</i> becomes JEANPAUL,
-<i>Łukasz</i> becomes LUKASZ. Two names are anagrams when they have the same letters.</p>
-<p>The names are in a tree of their sorted letters. The search goes down the tree of first names and enters a branch
-only if your name still has its letter. For each first name, the letters that remain give the last names. The tree
-puts the rarest letters (Q, X, Z…) at the top, so the search skips most of the names at once. A search takes a few
-milliseconds.</p>
-</section>
-
-<section>
-<h2>How probable is a full name?</h2>
-<p>A model gives the probability that a person in a country has this full name. It has two parts:</p>
-<ol>
-  <li><b>The two names alone.</b> The share of people with the first name in the country, times the share of people
-  with the last name.</li>
-  <li><b>The pair.</b> Some names go together more than chance: a Japanese first name with a Japanese last name, a
-  Portuguese first name with a Portuguese last name. Each name has 16 numbers, learned from 282 million people,
-  and the model compares the numbers of the two names.</li>
-</ol>
-<p><b>“1 in N”</b> is the share of people that the model expects to have the name. <i>Yuki Tanaka</i> is 1 in 13,000
-in Japan. Japan has 125 million people, so the model expects about 9,400 people with this name in Japan.</p>
-<p>For the world, the page mixes the countries by their population (World Bank, 2023), not by the number of
-accounts in the data: Japan has 1.9% of the population of the 105 countries, but only 0.09% of the accounts.</p>
-<details>
-<summary>Show the math</summary>
-<p>For a first name $f$, a last name $l$ and a country $c$, the base is:</p>
-$$p_0(f,l\mid c)=p(f\mid c)\,p(l\mid c),\qquad p(f\mid c)=\frac{N_{fc}+\alpha\,\pi_f}{N_c+\alpha}$$
-<p>with $N_{fc}$ the people of $c$ with the name $f$, $N_c$ the people of $c$, $\pi_f$ the share of $f$ in the
-world and $\alpha=10^5$. The model adds the pair term:</p>
-$$\log p(f,l\mid c)=\log p_0(f,l\mid c)+\mathbb{1}[(f,l)\in S_c]\,\bigl(\beta_c\,u_f^\top \operatorname{diag}(g_c)\,v_l+b_c\bigr)-\log Z_c$$
-<p>$u_f$ and $v_l$ have 16 numbers each. The weights $g_c$, the scale $\beta_c$ and the offset $b_c$ belong to the
-country. $S_c$ contains the pairs whose two names occur in $c$, and $Z_c$ makes the probabilities sum to 1. In the
-world, with $P_c$ the population of $c$ and $P$ the population of the 105 countries:</p>
-$$p(f,l)=\sum_c \frac{P_c}{P}\,p(f,l\mid c),\qquad p(c\mid f,l)=\frac{P_c\,p(f,l\mid c)}{P\,p(f,l)}$$
-<p>The expected people with the full name are $P\,p(f,l)$ in the world and $P_c\,p(f,l\mid c)$ in the country $c$.</p>
-</details>
-</section>
-
-<section>
-<h2>How was the model trained?</h2>
-<div class="tiles">
-  <div><b>0.467</b><span>bits per person better than the two names alone, on 35 million people that the model did
-  not see</span></div>
-  <div><b>105 of 105</b><span>countries are better than the two names alone (the lowest: Uruguay)</span></div>
-  <div><b>2.7 min</b><span>of training on a laptop GPU (Apple M4 Max)</span></div>
-</div>
-<p>We split the people at random: 282 million to train, 35 million to adjust, 35 million to test. The model learns
-the 16 numbers of each name that at least 20 people have (1.34 million names). The other names use the base only.</p>
-<p>The difficult part is $Z_c$: it adds 3.3 million million pairs. At each step of training, the model estimates it
-from 4,096 sample pairs per country. At the end, a GPU computes it exactly, in about 3 minutes.</p>
-<p>Then each country gets its own scale and offset for the pair term, fitted on the 35 million people kept to adjust.
-A scale of 0 gives the base, so the fit never makes a country worse than the base on these people. Each step
-helps:</p>
-<table class="steps">
-<tr><th>Step</th><th class="num">Bits gained per person</th><th class="num">Countries worse than the base</th></tr>
-<tr><td>Shared numbers, simple training</td><td class="num">0.303</td><td class="num">20</td></tr>
-<tr><td>+ weights per country</td><td class="num">0.328</td><td class="num">19</td></tr>
-<tr><td>+ better estimate of $Z_c$, names of 20 people or more</td><td class="num">0.409</td><td class="num">4</td></tr>
-<tr><td>+ scale and offset per country</td><td class="num"><b>0.467</b></td><td class="num"><b>0</b></td></tr>
-</table>
-<details>
-<summary>Show the math</summary>
-<p>The loss is the negative log-likelihood of the train people. The base terms are constant, thus</p>
-$$\ell=-\frac1N\sum_i s_{c_i}(f_i,l_i)+\sum_c w_c\log Z_c,\qquad Z_c=1-P_c+\sum_{(f,l)\in S_c}p_0(f,l\mid c)\,e^{s_c(f,l)}$$
-<p>with $w_c$ the share of the train people in $c$ and $P_c=p_0(S_c\mid c)$. With
-$Z_c=1-P_c+P_c\,\mathbb E_{p_0(\cdot\mid S_c)}[e^s]$, the expectation is estimated by self-normalized importance
-sampling [5] with $J=4096$ samples per country and step, from a mix of three proposals (the train people, the base
-on $S_c$, and the names of $c$ in proportion to their distinct pairs), so that every weight is at most 3. Training:
-$10^4$ steps of AdamW, batches of 65,536 people, learning rate $10^{-2}$, weight decay 0.1.</p>
-<p>Calibration: for each country, with $E=\mathbb E_{\text{valid}}[s\,\mathbb 1_S]$ and $Q=P_{\text{valid}}(S_c)$,
-the validation gain</p>
-$$G_c(\beta,b)=\beta E+bQ-\log\bigl(1-P_c+e^bM_c(\beta)\bigr),\qquad M_c(\beta)=\sum_{(f,l)\in S_c}p_0(f,l\mid c)\,e^{\beta s_c(f,l)}$$
-<p>has its best offset at $e^{b^\star}=Q(1-P_c)/\bigl((1-Q)M_c(\beta)\bigr)$. One pass per country gives $M_c(\beta)$
-for all $\beta$ in $\{0,0.01,\dots,2\}$. The median $\beta_c$ is 0.86: the trained pair term is too strong in most
-countries [4].</p>
-</details>
-</section>
-
-<section>
-<h2>How does it fit in a browser?</h2>
-<p>The 16 numbers of the 1.34 million names take 86 MB. The page stores each pair of numbers as one of 256 values,
-in one byte [6]: 11 MB, for a loss of 0.0056 bits per person.</p>
-<p>The page does not download the full data. It downloads the tree of the names first, then only the files of the
-names that your search finds, and one file with the real names of your letters. It keeps the files for the next
-searches.</p>
-<table class="steps">
-<tr><th>File</th><th class="num">Size</th></tr>
-<tr><td>The world: the tree and the people of each name, downloaded once</td><td class="num">9.2 MB</td></tr>
-<tr><td>The names that a search finds (a typical search: 85 files)</td><td class="num">1.5 MB</td></tr>
-<tr><td>The real full names of your letters (one file)</td><td class="num">113 KB</td></tr>
-<tr><td>France from INSEE (one file with all its data)</td><td class="num">13.0 MB</td></tr>
-</table>
-<details>
-<summary>Show the comparison</summary>
-<p>Loss against the 32-bit numbers, in bits per person: 8-bit numbers 0.000048, 4-bit numbers 0.010, one byte for 2
-numbers 0.0056 (chosen), one byte for 4 numbers 0.049, one byte for 8 numbers 0.120. With 4-bit numbers for the
-most frequent half of the names only (5.4 MB), the loss is 0.021. All these choices keep the 105 countries better
-than the base.</p>
-</details>
-</section>
-
-<section>
-<h2>Counted or computed?</h2>
-<p>The page never mixes the two:</p>
-<div class="pair">
-  <div><b>Counted in the data</b><span>The people of name_dataset with the name. “41 people” means 41 accounts.</span></div>
-  <div><b>Computed by the model</b><span>“1 in 700,000” and “≈ 180 people expected” are estimates from the
-  frequency of each name in each country.</span></div>
-</div>
-<p>The two can disagree. Four of the 11 accounts named <i>Louis Abraham</i> are in the United States, and none is in
-Nigeria. But the model puts the largest share of the expected people (23%) in Nigeria: the data has 1,601 people
-named <i>Louis</i> and 4,601 named <i>Abraham</i> there, and Nigeria has 3.5% of the population of the 105
-countries.</p>
-</section>
-
-<section>
-<h2>What do the servers see?</h2>
-<p>The search runs in your browser: the page does not send your name. But it downloads the files of the names
-made of your letters, so the server of the site can see which files, thus which letters your name can contain.
-The files contain the names and their people per country, and nothing else about the people.</p>
-</section>
-
-<section>
-<h2>Limits</h2>
+<h2>What data do you use?</h2>
 <ul>
-  <li>name_dataset comes from profiles of a social network: it has typing errors, nicknames and names from other
-  countries.</li>
-  <li>Only names in Latin script are kept.</li>
-  <li>INSEE covers only the people born in France, for the periods above.</li>
-  <li>The probabilities are estimates of a model. Some choices of the model were made with the test results
-  visible, so a small bias is possible.</li>
+  <li><b>Names:</b> <a href="https://github.com/philipperemy/name-dataset">name_dataset</a>
+  (<a href="https://drive.google.com/file/d/1QDbtPWGQypYxiS4pC_hHBBtbRHk9gEtr/view?usp=sharing">the full data, 3.3 GB</a>):
+  491,655,925 Facebook accounts (first name, last name, country) in 105 countries, from the leak of 2021.</li>
+  <li><b>Names in France:</b> INSEE, <a href="https://www.insee.fr/fr/statistiques/7633685?sommaire=7635552">the first
+  names</a> given to the children born from 1900 to 2022 (33,234 names), and
+  <a href="https://www.insee.fr/fr/statistiques/3536630">the last names</a> of the people born from 1891 to 2000
+  (215,906 names). INSEE counts each name alone, not the full names. For France, the model uses these counts
+  instead of the Facebook counts.</li>
+  <li><b>Population:</b> <a href="https://data.worldbank.org/indicator/SP.POP.TOTL">World Bank, 2023</a>, and for
+  Taiwan <a href="https://www.ris.gov.tw/app/en/3910">its Ministry of the Interior</a>.</li>
+  <li><b>Globe:</b> the countries of <a href="https://www.naturalearthdata.com/downloads/50m-cultural-vectors/50m-admin-0-countries-2/">Natural Earth</a>
+  (1:50m), simplified.</li>
 </ul>
+<p>Cleaning: we keep a person only if the two names are in Latin script, with letters, spaces, hyphens, apostrophes
+and periods only. Then we remove the names that fewer than 5 people have in the world: most are typing errors or
+fake names. This keeps 352,931,936 people, 1,724,039 first names, 3,456,059 last names and 154,775,215 different full
+names. From INSEE, we remove the lines that put the rare names together.</p>
 </section>
 
-<section class="refs">
-<h2>References</h2>
-<p>[1] P. Remy. name-dataset. <a href="https://github.com/philipperemy/name-dataset">github.com/philipperemy/name-dataset</a>, 2021.</p>
-<p>[2] INSEE. Fichier des prénoms, 1900–2022.</p>
-<p>[3] INSEE. Noms de famille des personnes nées en France, 1891–2000.</p>
-<p>[4] C. Guo, G. Pleiss, Y. Sun, K. Q. Weinberger. On calibration of modern neural networks. ICML, 2017.</p>
-<p>[5] Y. Bengio, J.-S. Senécal. Adaptive importance sampling to accelerate training of a neural probabilistic
-language model. IEEE Transactions on Neural Networks 19(4), 2008.</p>
-<p>[6] H. Jégou, M. Douze, C. Schmid. Product quantization for nearest neighbor search. IEEE TPAMI 33(1), 2011.</p>
+<section>
+<h2>How do you find anagranames?</h2>
+<p>A name becomes its letters A to Z, without accents, spaces or hyphens: <i>Jean-Paul</i> becomes JEANPAUL. Two
+full names are anagrams when they have the same letters.</p>
+<ol>
+  <li>We sort the letters of each name, the rarest letters (Q, X, Z…) first. The first names go in a trie of these
+  sorted letters: a tree where each node adds one letter, and each name is at the node of its last letter. The last
+  names go in a second trie.</li>
+  <li>The search goes down the trie of the first names. It enters a node only if your name has one more of its
+  letter, and if 2 letters at least stay for the last name.</li>
+  <li>At each first name, the letters that stay give one path in the trie of the last names. All the last names at
+  the end of this path make anagranames with this first name.</li>
+</ol>
+<p>The rare letters at the top cut most branches early: a search takes a few milliseconds. In a country, the search
+keeps the names seen in this country. The list of the real anagranames is in order of accounts. The list of the
+synthetic anagranames is in order of probability.</p>
+</section>
+
+<section>
+<h2>How do you rank the synthetic anagranames?</h2>
+<p>A model gives the probability that a person of the country $c$ has the first name $f$ and the last name $l$. It
+starts from the two names alone:</p>
+$$p_0(f,l\mid c)=p(f\mid c)\,p(l\mid c),\qquad p(f\mid c)=\frac{N_{fc}+\alpha\,\pi_f}{N_c+\alpha}$$
+<p>with $N_{fc}$ the people of $c$ with the first name $f$, $N_c$ the people of $c$, $\pi_f$ the share of $f$ in the
+world and $\alpha=10^5$ (the same for $p(l\mid c)$). For France, $N_{fc}$ is the people with $f$ in INSEE,
+scaled to the people of France in name_dataset. Then the model corrects the pair. Each name has a vector of 16 numbers:
+$u_f$ for a first name, $v_l$ for a last name. Each country has 16 weights $g_c$, a scale $\beta_c$ and an offset
+$b_c$:</p>
+$$\log p(f,l\mid c)=\log p_0(f,l\mid c)+\mathbb 1[(f,l)\in S_c]\,s_c(f,l)-\log Z_c$$
+$$s_c(f,l)=\beta_c\,u_f^\top\operatorname{diag}(g_c)\,v_l+b_c$$
+<p>$S_c$ contains the pairs whose two names occur in $c$ (for France: in INSEE), and $Z_c$ makes the
+probabilities sum to 1. For the world,
+the page mixes the countries by their population $P_c$, with $P=\sum_c P_c$:</p>
+$$p(f,l)=\sum_c\frac{P_c}{P}\,p(f,l\mid c)$$
+<p>The page ranks by $p(f,l)$, and shows $P\,p(f,l)$ as the people expected. In a country, it uses
+$p(f,l\mid c)$ and $P_c\,p(f,l\mid c)$. The correction learns which names go together. Four names in the United
+States, with the last names swapped:</p>
+<table class="steps">
+<tr><th>Full name</th><th class="num">Expected, two names alone</th><th class="num">Expected, model</th><th class="num">Accounts</th></tr>
+<tr><td>Jose Garcia</td><td class="num">26,900</td><td class="num">91,100 (×3.4)</td><td class="num">6,182</td></tr>
+<tr><td>Minh Nguyen</td><td class="num">18</td><td class="num">2,530 (×142)</td><td class="num">277</td></tr>
+<tr><td>Jose Nguyen</td><td class="num">3,400</td><td class="num">313 (×0.09)</td><td class="num">2</td></tr>
+<tr><td>Minh Garcia</td><td class="num">141</td><td class="num">53 (×0.38)</td><td class="num">0</td></tr>
+</table>
+<p><b>Training.</b> We split the people at random: 80% to train, 10% to calibrate, 10% to test. In France, we keep
+only the people whose two names are in INSEE (71.5%). This gives 278 million people to train, 35 million to calibrate
+and 35 million to test. Only the 1,339,826 names of 20 people or more get a vector; the vector of the other names is 0. The training uses
+$\beta_c=1$, $b_c=0$, and minimizes the negative log-likelihood of the train people. The base does not change, thus</p>
+$$\ell=-\frac1N\sum_{i=1}^N\mathbb 1[(f_i,l_i)\in S_{c_i}]\,s_{c_i}(f_i,l_i)+\sum_c w_c\log Z_c$$
+$$Z_c=1-\rho_c+\rho_c\,\mathbb E_{(f,l)\sim p_0(\cdot\mid S_c)}\!\left[e^{s_c(f,l)}\right]$$
+<p>with $w_c$ the share of the train people in $c$ and $\rho_c=p_0(S_c\mid c)$. The sets $S_c$ have 3 million million
+pairs in all, so each step estimates the expectation by self-normalized importance sampling, as in
+<a href="https://proceedings.mlr.press/r4/bengio03a/bengio03a.pdf">Bengio and Senécal</a>: $J=4096$ pairs $x_j$ per
+country, from a mix $q_c$ of the train people of $c$, of $p_0$ on $S_c$, and of the names of $c$ in proportion to
+their pairs:</p>
+$$\mathbb E\!\left[e^{s_c}\right]\approx\frac{\sum_j r_j\,e^{s_c(x_j)}}{\sum_j r_j},\qquad r_j=\frac{p_0(x_j\mid S_c)}{q_c(x_j)}\le 3$$
+<p>The optimizer is <a href="https://arxiv.org/pdf/1711.05101">AdamW</a>: $10^4$ steps, batches of 65,536 people,
+learning rate $10^{-2}$, weight decay 0.1. This takes 2.3 minutes on a laptop GPU (Apple M4 Max). Then the GPU
+computes the exact $Z_c$.</p>
+<p><b>Calibration.</b> As with the neural networks of <a href="https://arxiv.org/pdf/1706.04599">Guo et al.</a>, the
+trained correction is too strong. For each country, $\beta_c$ and $b_c$ maximize the gain on the calibration
+people:</p>
+$$G_c(\beta,b)=\beta E_c+bQ_c-\log\bigl(1-\rho_c+e^{b}M_c(\beta)\bigr)$$
+$$M_c(\beta)=\sum_{(f,l)\in S_c}p_0(f,l\mid c)\,e^{\beta s_c(f,l)}$$
+<p>with $E_c$ the mean of $\mathbb 1_{S_c}s_c$ and $Q_c$ the share in $S_c$ of these people. The best offset is
+$e^{b^\star}=Q_c(1-\rho_c)/\bigl((1-Q_c)M_c(\beta)\bigr)$, and a search on $\beta\in\{0,0.01,\dots,2\}$ gives the
+scale. The median $\beta_c$ is 0.88. $\beta=0$ gives the base, so no country gets worse than the base. France
+keeps $\beta=1$ and $b=0$: its calibration people all have their two names in INSEE, so they are not a sample of
+France.</p>
+<p><b>Result.</b> On the 35 million test people, the model needs 25.117 bits per person, against 25.572 for the two
+names alone: 0.454 bits less. All 105 countries are better, from 0.03 bits (Uruguay) to 3.3 bits (Burkina Faso).</p>
+</section>
+
+<section>
+<h2>How do the data and the model fit in a browser?</h2>
+<ul>
+  <li><b>Vectors:</b> the 1.34 million vectors take 86 MB in 32-bit numbers. With
+  <a href="https://www.irisa.fr/texmex/people/jegou/papers/jegou_searching_with_quantization.pdf">product
+  quantization</a>, each pair of numbers becomes one byte: the index of the nearest of 256 learned pairs. They take
+  11 MB, and the model needs less than 0.01 bits per person more.</li>
+  <li><b>Normalization:</b> $\log Z_c$ is computed once, before the export. The browser only adds the terms.</li>
+  <li><b>Tries:</b> one letter per node, in preorder, with the size of each subtree. The file of the world has the
+  two tries and the people of each name: 9.2 MB in gzip, downloaded once.</li>
+  <li><b>Names:</b> the spellings, the people per country and the vectors are in files of 1,024 names. A search
+  downloads only the files of the names it finds (a typical search: 85 files, 1.5 MB).</li>
+  <li><b>Real full names:</b> 155 million, in 4,096 files. Each letter has a random number, and the file of a full
+  name is the sum of the numbers of its letters, modulo 4,096. Thus all your anagranames are in one file (113 KB on
+  average).</li>
+</ul>
+<p>The browser keeps the files for the next searches. The search and the model run in your browser: the page does not
+send your name.</p>
 </section>
 </main>
 <footer class="credit">Made with <span aria-label="love">❤️</span> by <a href="https://louisabraham.github.io/">Louis Abraham</a></footer>

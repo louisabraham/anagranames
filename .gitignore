@@ -1,6 +1,7 @@
 # Data and model files (large, rebuilt by scripts)
 name_dataset/
 data/
+data_fr_insee/
 *.npy
 *.npz
 *.csv

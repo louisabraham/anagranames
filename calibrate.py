@@ -6,6 +6,9 @@
 #   gain(beta, b) = beta * E[s 1_in] + b * P(in) - log(P_out + e^b M(beta)),  M(beta) = sum_in p e^(beta s)
 # with E and P(in) over the people of a split and p the null. One exact pass per country gives a
 # histogram of s weighted by p, hence M(beta) for any beta; the best b is in closed form.
+# A country with a base (namedata.with_insee: France) keeps beta 1, b 0: its people in the data are only those whose
+# names are in the base, not a sample of the country (all of them are in the support, so b goes to its bound).
+# Run: caffeinate -i .venv/bin/python calibrate.py <model.npz> [--data-dir data]   (about 90 min for the world)
 import argparse
 import os
 import time
@@ -95,6 +98,9 @@ def main():
     i1 = int(np.nonzero(BETAS == 1)[0][0])
     print(f"{'cc':<3} {'beta':>5} {'b':>6}  valid gain raw -> fitted   test gain raw -> fitted (bits)", flush=True)
     for c in range(ds.C):
+        if c in ds.base:
+            print(f"{ds.countries[c]:<3} {1:5.2f} {0:+6.2f}  (a base: not calibrated)", flush=True)
+            continue
         h0, h1, p_out = null_histogram(model, ds, c, in_f, in_l, X, Y)
         es_v, pin_v = split_stats(model, ds, c, in_f, in_l, "valid")
         es_t, pin_t = split_stats(model, ds, c, in_f, in_l, "test")

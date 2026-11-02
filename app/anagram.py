@@ -16,8 +16,9 @@
 # forms, people per country, vectors) in chunk files of 1024 names; this version reads all of them.
 #
 # Rank. With N the people counts of the pack data,
-#   log p(f, l | c) = X[f, c] + Y[l, c] + [f and l seen in c] (u_f . (g_c * v_l) + b_c) - log Z_c
+#   log p(f, l | c) = X[f, c] + Y[l, c] + [N[f, c] > 0 and N[l, c] > 0] (u_f . (g_c * v_l) + b_c) - log Z_c
 #   X[f, c] = log(N[f, c] + alpha pi_f) - log(N_c + alpha),   pi_f = (N_f + 1/2) / (sum of N_f + n_first / 2)
+# For France in the world pack, N[f, FR] is the people of f in INSEE, scaled to the people of France in the data.
 # and Y is the same for last names. In a pack of several countries without a country, the rank uses the
 # mixture p(f, l) = sum_c (P_c / P) p(f, l | c), with P_c the population of c (not N_c: name_dataset does not
 # have the same share of each population), and each result shows the country with the largest term.
@@ -141,6 +142,7 @@ class Side:
             self.part = np.repeat(np.cumsum(d)[:-1], ends) % meta["parts"]
             self.by_rank = np.lexsort((np.arange(self.n), -self.total))  # most people first
         self.log_norm = np.log(np.array(m["people"], np.float64) + meta["alpha"])  # log(N_c + alpha)
+        self.scale = np.array(m.get("scale", [1.0] * len(m["people"])), np.float64)  # people of the model per count
 
         has = np.unpackbits(get("vec"), count=self.n).astype(bool)
         self.row = np.full(self.n, -1)
@@ -169,14 +171,15 @@ class Side:
         return self.entry_key[i] == k
 
     def log_weights(self, ids):
-        """X[ids, c] for all pack countries c, and whether each name is seen in each country."""
+        """X[ids, c] for all pack countries c, and whether each name has people in each country (count > 0: the
+        pair term applies; a country with a base lists the names seen in the data too, with count 0)."""
         lens = self.ptr[ids + 1] - self.ptr[ids]
         rows = np.repeat(np.arange(len(ids)), lens)
         cells = ranges(self.ptr[ids], lens)
         counts = np.zeros((len(ids), len(self.log_norm)))
         counts[rows, self.country[cells]] = self.count[cells]
         with np.errstate(divide="ignore"):  # alpha = 0: a name has no weight where it is not seen
-            return np.log(counts + self.alpha_prior[ids, None]) - self.log_norm, counts > 0
+            return np.log(counts * self.scale + self.alpha_prior[ids, None]) - self.log_norm, counts > 0
 
     def vectors(self, ids):
         """Name vectors (len(ids), k); 0 for names without a vector (the null score)."""

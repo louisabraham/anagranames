@@ -72,12 +72,17 @@ class Model:
 
 
 def support(ds):
-    """Flat (name * C + c) masks of names that occur in the training data of country c."""
+    """Flat (name * C + c) masks of the names of country c: the names that occur in its training data, or for a
+    country with a base (ds.base: INSEE for France), the names of its base."""
     if not hasattr(ds, "_support"):
-        ds._support = tuple(
-            np.bincount(ids.astype(np.int64) * ds.C + ds.c, weights=ds.n_train, minlength=n * ds.C) > 0
-            for ids, n in [(ds.f, ds.n_first), (ds.l, ds.n_last)]
-        )
+        masks = []
+        for side, (ids, n) in enumerate([(ds.f, ds.n_first), (ds.l, ds.n_last)]):
+            m = np.bincount(ids.astype(np.int64) * ds.C + ds.c, weights=ds.n_train, minlength=n * ds.C) > 0
+            m = m.reshape(n, ds.C)
+            for c, counts in ds.base.items():
+                m[:, c] = counts[side] > 0
+            masks.append(m.reshape(-1))
+        ds._support = tuple(masks)
     return ds._support
 
 
@@ -236,8 +241,7 @@ def train_counts(ds, alpha, k=16, K_neg=16, batch=2**16, steps=10000, lr=1e-2, w
     """
     mx.random.seed(seed)
     model = PairParams(ds.n_first, ds.n_last, k, bias, ds.C if gates else 0)
-    cf = np.bincount(ds.f, weights=ds.n_train, minlength=ds.n_first)
-    cl = np.bincount(ds.l, weights=ds.n_train, minlength=ds.n_last)
+    cf, cl = namedata.people(ds)  # the dropped triples too (namedata.with_insee): the same names get a vector
     mask_f = mx.array((cf >= min_embed).astype(np.float32))[:, None]
     mask_l = mx.array((cl >= min_embed).astype(np.float32))[:, None]
     K_u = int(round(neg_uniform * K_neg))
@@ -471,6 +475,7 @@ def main():
                         help="interaction only between names seen in the country (implied by --gates)")
     parser.add_argument("--load", nargs="*", default=[], help="evaluate models saved by --save-dir")
     parser.add_argument("--save-dir", default=None, help="save each counts model here")
+    parser.add_argument("--alpha", type=float, default=None, help="smoothing of the bases (default: tuned on the data)")
     parser.add_argument("--out", default=None, help="append results to this JSON file")
     args = parser.parse_args()
 
@@ -488,7 +493,7 @@ def main():
             saved.extend(results[len(saved):])
 
     saved = []
-    alpha = tune_alpha(ds)
+    alpha = args.alpha if args.alpha is not None else tune_alpha(ds)
     null = report(f"null (alpha={alpha})", null_model(ds, alpha), ds, results)
     save_results()
     if args.original:
