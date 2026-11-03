@@ -23,7 +23,8 @@ node web/build.mjs
 python3 -m http.server -d web 8000
 ```
 
-Tests: `uv run --no-project --with playwright --with numpy python web/e2e.py` (Chromium; `--all`: 3 browsers and 5
-phone and tablet profiles), and `uv run --no-project --with numpy python app/parity.py`.
+Tests: `uv run --no-project --with playwright --with numpy python web/e2e.py` (Chromium; `--all`, as on CI: also
+WebKit and Firefox for the tests of the engines, and 3 phone and tablet profiles), and
+`uv run --no-project --with numpy python app/parity.py`.
 
 Made by [Louis Abraham](https://louisabraham.github.io/).

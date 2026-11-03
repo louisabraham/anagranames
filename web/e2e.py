@@ -3,11 +3,12 @@
 # errors, console errors and failed requests.
 # Run: node web/build.mjs, then
 #   uv run --no-project --with playwright --with numpy python web/e2e.py [-k globe,keys] [--all] [-j 6]
-# By default: Chromium only, no phones (while working, with -k: the tests of the change). --all, before a commit: the 3
-# browsers and the phone and tablet profiles of MOBILE. --browser and --devices choose them one by one. The tests run in
-# parallel processes (-j).
+# By default: Chromium only, no phones (while working, with -k: the tests of the change). --all (CI, and before a
+# commit): also WebKit and Firefox (the tests of ENGINE only, unless -k) and the phone and tablet profiles of MOBILE.
+# --browser and --devices choose them one by one. The tests run in parallel processes (-j).
 # The first time: uv run --no-project --with playwright playwright install chromium-headless-shell webkit firefox
 import argparse
+import functools
 import http.server
 import json
 import math
@@ -62,9 +63,10 @@ def close(text, want):
     return abs(float(text.replace(",", "")) - want) <= 0.06 * want + 0.006
 
 
+@functools.cache  # a test asks for the same search several times (the list, the message, the countries)
 def expected(source, query, limit=50, by_model=False):
     """The search of app/anagram.py in a source: world or a country code; by_model: all the names, the most probable
-    first."""
+    first. The callers only read the result."""
     return model("world").search(query, None if source == "world" else source, limit, by_model)
 
 
@@ -95,7 +97,7 @@ def check_message(page, query, synthetic):
     names; with the synthetic names, the names generated too."""
     w = expected("world", query, 0)
     rn, rp, z = w["real_names"], w["real_people"], w["found"] - w["real_names"]
-    real = [f"Found {n(rn)} real anagraname{'' if rn == 1 else 's'}", f"on {n(rp)} Facebook account{'' if rp == 1 else 's'}"]
+    real = [f"Found {n(rn)} real anagraname{'' if rn == 1 else 's'} on {n(rp)} Facebook account{'' if rp == 1 else 's'}"]
     gen = f"{n(z)} synthetic anagraname{'s' if z > 1 else ''} generated" if z else "No synthetic anagraname generated"
     want = real + [gen] if synthetic else real
     try:
@@ -148,14 +150,15 @@ def check_list(page, source, query, synthetic=False, limit=50):
 
 
 def link(base, query="", pack="world", synthetic=False):
-    """The address of a view: ?Yuki+Tanaka, with &in=JP for a source other than the world, &synthetic for the
-    synthetic people."""
-    parts = [quote_plus(query)] + ([f"in={pack}"] if pack != "world" else []) + (["synthetic"] if synthetic else [])
-    return f"{base}/?{'&'.join(parts)}" if query else f"{base}/"
+    """The address of a view: ?Yuki+Tanaka, with &in=JP for a source other than the world, &real for the real people
+    only (the synthetic people are the default of the page)."""
+    parts = ([quote_plus(query)] if query else []) + ([f"in={pack}"] if pack != "world" else []) + ([] if synthetic else ["real"])
+    return f"{base}/?{'&'.join(parts)}" if parts else f"{base}/"
 
 
 def start(page, base, query="", pack="world", synthetic=False):
-    page.goto(link(base, query, pack, synthetic))
+    # the HTML only: app.js says when it is ready (in Firefox, the load event can wait long when a test has a route)
+    page.goto(link(base, query, pack, synthetic), wait_until="domcontentloaded")
     page.wait_for_function("document.body.dataset.ready", timeout=WAIT)  # app.js has run
 
 
@@ -169,31 +172,56 @@ def bars(page):
 
 # ---------- tests: each gets a new page (empty cache) and the address of the server ----------
 
+def test_about(page, base):
+    """A first visit: the synthetic people (the default), and a text under the question that says what the page does;
+    a name to try searches it and the text goes away; a cleared field shows it again. The headers of the two lists
+    give the unit of their numbers."""
+    page.goto(f"{base}/")
+    page.wait_for_function("document.body.dataset.ready", timeout=WAIT)
+    assert page.locator("#about").is_visible(), "no text for a first visit"
+    assert page.get_attribute("#synthetic", "aria-checked") == "true", "the synthetic people are not the default"
+    page.click("#about .try button >> nth=0")
+    check_list(page, "world", "Arsène Lupin", synthetic=True)
+    assert page.input_value("#q") == "Arsène Lupin", page.input_value("#q")
+    assert page.locator("#about").is_hidden(), "the text for a first visit stays with the people"
+    wait_hist(page)
+    units = page.evaluate("[...document.querySelectorAll('.pane-head .unit')].map((u) => u.textContent)")
+    assert units == ["People expected"] * 2, f"units: {units}"
+    page.click("#synthetic")
+    check_list(page, "world", "Arsène Lupin")
+    page.wait_for_function("document.getElementById('hist').dataset.mode === 'real'", timeout=WAIT)
+    units = page.evaluate("[...document.querySelectorAll('.pane-head .unit')].map((u) => u.textContent)")
+    assert units == ["Accounts"] * 2, f"units: {units}"
+    page.click("#clear")
+    page.wait_for_selector("#about", state="visible", timeout=WAIT)
+
+
 def test_type_world(page, base):
-    """Type a name letter by letter in the world: the real full names, of 1 person too."""
+    """Type a name letter by letter in the world: fewer than 4 letters give a hint; then the real full names, of 1
+    person too; a capital letter at the start of each word."""
     start(page, base)
-    page.locator("#q").press_sequentially("Yuki Tanaka", delay=40)
+    page.locator("#q").press_sequentially("yuk", delay=40)
+    wait_status(page, "Type at least 4 letters")
+    page.locator("#q").press_sequentially("i tanaka", delay=40)
+    assert page.input_value("#q") == "Yuki Tanaka", page.input_value("#q")
     res = check_list(page, "world", "Yuki Tanaka")
     assert any(r["real"] == 1 for r in res), "no full name of 1 person in the reference"
 
 
-def test_short_then_longer(page, base):
-    """Fewer than 4 letters, then the 4th letter: the status changes from the hint to the people."""
-    start(page, base)
-    page.locator("#q").press_sequentially("Yuk", delay=40)
-    wait_status(page, "Type at least 4 letters")
-    page.locator("#q").press_sequentially("i", delay=40)
-    check_list(page, "world", "Yuki")
-
-
-def test_query_in_address(page, base):
-    """A shared address with a query (and the address of the old pages): the people show without typing, and the
-    address bar is clean."""
-    start(page, base, "Branka Balevic")
-    check_list(page, "world", "Branka Balevic")
+def test_address(page, base):
+    """A shared address opens its view without typing, and the address bar is cleaned: a name, a country, the real
+    people only (&real). Without &real: the synthetic people (the default). The addresses of the old pages
+    (?anagrams=..., ?first=...&last=..., &synthetic) too, with a capital letter at the start of each word."""
+    page.goto(f"{base}/?Yuki+Tanaka&in=JP&real")
+    check_list(page, "JP", "Yuki Tanaka")
     assert page.url == f"{base}/", f"the address is not cleaned: {page.url}"
     page.goto(f"{base}/?anagrams=Branka+Balevic")
-    check_list(page, "world", "Branka Balevic")
+    check_list(page, "world", "Branka Balevic", synthetic=True)
+    assert page.get_attribute("#synthetic", "aria-checked") == "true"
+    page.goto(f"{base}/?first=jean-paul&last=sartre&synthetic")
+    page.wait_for_function("document.getElementById('q').value !== ''", timeout=WAIT)
+    assert page.input_value("#q") == "Jean-Paul Sartre", page.input_value("#q")
+    assert page.get_attribute("#synthetic", "aria-checked") == "true"
 
 
 def test_switch(page, base):
@@ -239,16 +267,6 @@ def test_country_in_world(page, base):
         check_list(page, pack, q, synthetic=not mine["real"])
         tags = page.eval_on_selector_all("#results li.you", "ts => ts.length")
         assert tags == 1, f"{pack}: the query is not in the list"
-
-
-def test_capitals(page, base):
-    """A capital letter at the start of each word of a name, as the visitor types, and in a shared address."""
-    start(page, base)
-    page.locator("#q").press_sequentially("jean-paul sartre", delay=20)
-    assert page.input_value("#q") == "Jean-Paul Sartre", page.input_value("#q")
-    page.goto(f"{base}/?first=yuki&last=tanaka")
-    page.wait_for_function("document.getElementById('q').value !== ''", timeout=WAIT)
-    assert page.input_value("#q") == "Yuki Tanaka", page.input_value("#q")
 
 
 def test_you(page, base):
@@ -506,18 +524,6 @@ def test_headers_stay(page, base):
     assert abs(widths[0] - widths[1]) <= 1, f"the two lists are {widths} px wide"
 
 
-def test_clear(page, base):
-    """The cross in the field clears the name: no people, the field empty and ready to type."""
-    start(page, base, "Yuki Tanaka")
-    check_list(page, "world", "Yuki Tanaka")
-    page.click("#clear")
-    page.wait_for_function("document.getElementById('view').hidden", timeout=WAIT)
-    assert page.input_value("#q") == "" and page.locator("#clear").is_hidden(), "the field is not cleared"
-    assert page.evaluate("document.activeElement.id") == "q", "the field does not take the focus"
-    page.keyboard.type("Yuki Tanaka")
-    check_list(page, "world", "Yuki Tanaka")
-
-
 def test_definition(page, base):
     """The definition of the word: hidden, then open while the mouse is over the word, closed when it leaves; a click
     keeps it open, Escape closes it."""
@@ -542,7 +548,7 @@ def test_fits_the_window(page, base):
     synthetic people, and with a country."""
     start(page, base, "Arsene Lupin")
     check_list(page, "world", "Arsene Lupin")
-    for w, h in [(1280, 650), (1280, 720), (1440, 900), (1920, 1080)]:
+    for w, h in [(1280, 650), (1920, 1080)]:  # the smallest computer screen, and a large one
         page.set_viewport_size({"width": w, "height": h})
         for step in ("real", "synthetic", "country"):
             if step == "synthetic":
@@ -669,7 +675,7 @@ def test_globe_resize(page, base):
     page.emulate_media(reduced_motion="reduce")
     start(page, base, "Yuki Tanaka")
     check_list(page, "world", "Yuki Tanaka")
-    for w, h in [(1600, 1000), (1180, 760), (960, 900), (600, 900), (320, 640)]:
+    for w, h in [(1600, 1000), (960, 900), (320, 640)]:  # the three layouts: 3 panels, 2 + 1, 1
         page.set_viewport_size({"width": w, "height": h})
         check_globe(page, f"{w}x{h}")
         page.evaluate("document.getElementById('globe').scrollIntoView({ block: 'center' })")
@@ -688,13 +694,6 @@ def test_globe_resize(page, base):
             page.mouse.move(0, 0)
 
 
-def test_address_of_a_view(page, base):
-    """A shared address opens its view: a name, a country, the synthetic people; the address bar is cleaned."""
-    page.goto(f"{base}/?Yuki+Tanaka&in=JP&synthetic")
-    check_list(page, "JP", "Yuki Tanaka", synthetic=True)
-    assert page.url == f"{base}/", f"the address is not cleaned: {page.url}"
-
-
 def test_scroll_more(page, base):
     """Scrolling to the end of the list loads 50 more people."""
     start(page, base, "Yuki Tanaka", synthetic=True)
@@ -705,25 +704,28 @@ def test_scroll_more(page, base):
 
 
 def test_fast_typing_and_clear(page, base):
-    """Type fast (one search per letter, most of them stopped by the next letter), then clear the query."""
+    """Type fast (one search per letter, most of them stopped by the next letter); the cross clears the name: no
+    people, the field empty and ready to type."""
     start(page, base)
     page.locator("#q").press_sequentially("Wolfgang Amadeus Mozart")
     check_list(page, "world", "Wolfgang Amadeus Mozart")
-    page.fill("#q", "")
+    page.click("#clear")
     wait_status(page, "")
+    page.wait_for_function("document.getElementById('view').hidden", timeout=WAIT)
     assert page.locator("#results li").count() == 0, "people stay after the query is cleared"
-    assert page.locator("#view").is_hidden(), "the globe and the list stay after the query is cleared"
+    assert page.input_value("#q") == "" and page.locator("#clear").is_hidden(), "the field is not cleared"
+    assert page.evaluate("document.activeElement.id") == "q", "the field does not take the focus"
 
 
 def test_reload_resets(page, base):
-    """A reload starts again: no name, no people, the top of the page."""
-    start(page, base, "Yuki Tanaka", "JP", synthetic=True)
-    check_list(page, "JP", "Yuki Tanaka", synthetic=True)
+    """A reload starts again: no name, no people, the top of the page, the synthetic people (the default)."""
+    start(page, base, "Yuki Tanaka", "JP")
+    check_list(page, "JP", "Yuki Tanaka")
     page.evaluate("scrollTo(0, 500)")
     page.reload()
     page.wait_for_function("document.body.dataset.ready", timeout=WAIT)
     state = page.evaluate("[document.getElementById('q').value, document.getElementById('view').hidden, scrollY, document.getElementById('synthetic').getAttribute('aria-checked')]")
-    assert state == ["", True, 0, "false"], f"after a reload: field {state[0]!r}, view hidden {state[1]}, scroll {state[2]}, switch {state[3]}"
+    assert state == ["", True, 0, "true"], f"after a reload: field {state[0]!r}, view hidden {state[1]}, scroll {state[2]}, switch {state[3]}"
 
 
 def test_new_build(page, base):
@@ -747,15 +749,20 @@ def test_error_shown(page, base):
     page.wait_for_function("document.getElementById('status').textContent.startsWith('Error: 503')", timeout=WAIT)
 
 
-TESTS = [test_type_world, test_short_then_longer, test_query_in_address, test_switch, test_country,
-         test_country_in_world, test_capitals, test_you, test_histogram, test_synthetic_nowhere_real, test_real_among_synthetic, test_names_whole, test_keyboard, test_keys, test_switch_country, test_rows, test_headers_stay, test_clear, test_definition, test_fits_the_window, test_globe, test_globe_resize,
-         test_address_of_a_view, test_scroll_more,
-         test_fast_typing_and_clear, test_reload_resets, test_new_build, test_error_shown]
+TESTS = [test_about, test_type_world, test_address, test_switch, test_country, test_country_in_world, test_you,
+         test_histogram, test_synthetic_nowhere_real, test_real_among_synthetic, test_names_whole, test_keyboard, test_keys,
+         test_switch_country, test_rows, test_headers_stay, test_definition, test_fits_the_window, test_globe,
+         test_globe_resize, test_scroll_more, test_fast_typing_and_clear, test_reload_resets, test_new_build,
+         test_error_shown]
+# WebKit and Firefox run only the tests of what the engines do in different ways (layout, focus and keys, pointer,
+# scroll, canvas, Intl): the search and the numbers come from the same code in all browsers.
+ENGINE = {test_about, test_names_whole, test_keyboard, test_keys, test_rows, test_headers_stay, test_definition,
+          test_fits_the_window, test_globe, test_scroll_more}
 EXPECT_ERRORS = {test_error_shown}
 
 
 # ---------- phones and tablets: Playwright profiles (screen size, touch, user agent) ----------
-MOBILE = ["iPhone SE", "iPhone 13", "iPhone 13 landscape", "Pixel 7", "iPad Mini"]
+MOBILE = ["iPhone SE", "Pixel 7", "iPad Mini"]  # the smallest phone (WebKit), Android (Chromium), a tablet
 MEASURE = """() => {
   const vw = innerWidth, shown = (el) => el.getClientRects().length > 0, box = (el) => el.getBoundingClientRect();
   const label = (el) => `${el.tagName.toLowerCase()} ${(el.id || el.textContent).trim().slice(0, 24)} (${Math.round(box(el).width)}x${Math.round(box(el).height)})`;
@@ -780,8 +787,8 @@ MEASURE = """() => {
 }"""
 READY = "document.getElementById('headline').dataset.key && document.querySelector('#hist .hbar')"
 LAYOUT = [("empty", "/", "document.body.dataset.ready"),
-          ("real people", "/?Louis+Abraham", READY),
-          ("synthetic people", "/?Louis+Abraham&synthetic", READY),
+          ("real people", "/?Louis+Abraham&real", READY),
+          ("synthetic people", "/?Louis+Abraham", READY),
           ("a country", "/?Yuki+Tanaka&in=JP", READY),
           ("how it works", "/how.html", "document.readyState === 'complete'")]
 
@@ -983,17 +990,20 @@ def main():
     words = (args.k or "").replace(",", " ").split()
     pick = lambda tests: [t.__name__ for t in tests if not words or any(w in t.__name__ for w in words)]  # noqa: E731
     tests, mobile = pick(TESTS), pick(MOBILE_TESTS)
+    # Chromium: all the tests; WebKit and Firefox: the tests of ENGINE (all the tests chosen with -k)
+    of = lambda b: tests if b == "chromium" or words else [t for t in tests if globals()[t] in ENGINE]  # noqa: E731
     version = json.load(open(f"{ROOT}/web/data/version.json"))["version"]
     server = Server(("127.0.0.1", 0), partial(Quiet, directory=f"{ROOT}/web"))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     shots = tempfile.mkdtemp(prefix="anagranames-e2e-")
     # the jobs: each browser and each device, its tests in chunks (a chunk: one launch of the browser)
-    groups = [("browser", b, tests) for b in browsers] + [("device", d, mobile) for d in devices if mobile]
+    groups = [("browser", b, of(b)) for b in browsers if of(b)] + [("device", d, mobile) for d in devices if mobile]
     size = max(1, math.ceil(sum(len(g[2]) for g in groups) / max(1, args.jobs)))
     jobs = [(kind, name, names[i : i + size], base, shots, args.headed)
             for kind, name, names in groups for i in range(0, len(names), size)]
-    print(f"web/ build {version} at {base}: {len(tests)} tests x {browsers}, {len(mobile)} tests x {len(devices)} devices,"
+    print(f"web/ build {version} at {base}: {', '.join(f'{len(of(b))} tests x {b}' for b in browsers)},"
+          f" {len(mobile)} tests x {len(devices)} devices,"
           f" {len(jobs)} jobs on {args.jobs} processes", flush=True)
     failed, t0 = 0, time.time()
     with ProcessPoolExecutor(max_workers=args.jobs) as pool:

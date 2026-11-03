@@ -53,12 +53,24 @@
           <input id="q" class="field" type="text" placeholder="Arsène Lupin" autocomplete="off" autocapitalize="words"
             spellcheck="false" enterkeyhint="search">
         </div>
-        <button id="synthetic" class="switch" type="button" role="switch" aria-checked="false" aria-keyshortcuts="S"
+        <button id="synthetic" class="switch" type="button" role="switch" aria-checked="true" aria-keyshortcuts="S"
           aria-label="Activate synthetic names (key S)">
           <span class="key" aria-hidden="true"><span class="lamp"></span></span>
           <span class="switch-label">Activate<br><span class="hotkey">S</span>ynthetic names</span>
         </button>
       </div>
+    </section>
+    <section id="about" class="about" aria-label="What the page does">
+      <p class="lead">Type your full name. The page finds your anagranames: the full names with exactly the same
+        letters, in 105 countries.</p>
+      <ul class="legend">
+        <li><span class="tag real">Real</span> The full names of Facebook accounts (a leak of 2021), with their number
+          of accounts.</li>
+        <li><span class="tag synthetic">Synthetic</span> The most likely full names, with the number of people
+          expected.</li>
+      </ul>
+      <p class="try">Try <button class="chip" type="button">Arsène Lupin</button><button class="chip"
+          type="button">Lionel Messi</button><button class="chip" type="button">Albert Einstein</button></p>
     </section>
     <section id="view" hidden>
       <h2 id="headline" class="visually-hidden" aria-live="polite"></h2>
@@ -73,7 +85,8 @@
         </div>
         <div id="hist" class="hist pane"></div>
         <div id="people" class="pane people">
-          <p class="pane-head"><span>Names</span><span id="names" class="count"></span></p>
+          <p class="pane-head"><span>Names</span><span id="names" class="count"></span><span id="unit"
+              class="unit"></span></p>
           <div id="people-body" class="pane-body">
             <ol id="results" class="results"></ol>
             <button id="more" class="chip" type="button" hidden>More</button>

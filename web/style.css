@@ -410,6 +410,53 @@ h1 .term[aria-expanded="true"] {
   text-transform: uppercase;
 }
 
+/* the text of a first visit, under the question (app.js: while no name gives people): what the page does, the two
+   kinds of names, with the labels of the list, and names to try */
+.about {
+  display: grid;
+  gap: 16px;
+  max-width: 46rem;
+  margin: clamp(22px, 4vh, 40px) 0 32px;
+  line-height: 1.5;
+}
+.about p {
+  margin: 0;
+}
+.about .lead {
+  font-size: clamp(17px, 1.8vw, 20px);
+  color: var(--white);
+}
+.legend {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.legend li .tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.tag.synthetic { /* as the bars of the synthetic people: an outline */
+  border: 1px solid var(--phos);
+  color: var(--phos);
+  text-shadow: var(--glow);
+}
+.about .try {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .chip {
   margin: 0;
   padding: 6px 12px;
@@ -566,18 +613,19 @@ h1 .term[aria-expanded="true"] {
 }
 .tally {
   flex: none;
-  min-height: calc(4.5em + 9px); /* room for three lines: the globe does not move with the switch */
+  min-height: calc(3em + 9px); /* room for two lines: the globe does not move with the switch */
   margin: 12px 12px 0;
   padding: 0 8px 8px;
   border-bottom: 1px solid var(--line);
-  font-size: 15px;
+  font-size: 13px; /* the real names and their accounts: one line on a computer */
   line-height: 1.5;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--muted);
 }
 .tally p {
   margin: 0;
+  text-wrap: balance; /* a phone: two lines of the same length, not a word alone */
 }
 .tally b {
   font-weight: 400;
@@ -665,8 +713,12 @@ h1 .term[aria-expanded="true"] {
   color: var(--phos);
 }
 .pane-head .count {
+  color: var(--muted);
+}
+.pane-head .unit { /* the unit of the numbers, above them */
   margin-left: auto;
   color: var(--muted);
+  text-align: right;
 }
 /* a list is a grid, and its rows share its columns (subgrid): the bars start on one line. The countries: a fixed part
    for the names (a long one is cut); the names of people: the width of the longest one (else they are cut), the bars

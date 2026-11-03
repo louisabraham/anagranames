@@ -50,9 +50,10 @@ function populationOf(model, source) {
 // ---------- the view ----------
 // The address stays the address of the page: the view is in the history entries (their state), so the back and
 // forward buttons go between the views (a country, the switch). A shared address is read once, then removed from the
-// address bar: ?Yuki+Tanaka, &in=JP for a country, &synthetic for the synthetic people. The addresses of the old pages
-// (?anagrams=..., ?first=...&last=..., ?full=...) give the same view. A reload starts again.
-const KNOWN = ["anagrams", "full", "first", "last", "in", "synthetic"];
+// address bar: ?Yuki+Tanaka, &in=JP for a country, &real for the real people only (the synthetic people are the
+// default; &synthetic, of the old addresses, does nothing). The addresses of the old pages (?anagrams=...,
+// ?first=...&last=..., ?full=...) give the same view. A reload starts again.
+const KNOWN = ["anagrams", "full", "first", "last", "in", "real", "synthetic"];
 function capital(text) { // a capital letter at the start of each word of a name (and after a hyphen: Jean-Paul)
   return text.replace(/(^|[\s-])(\p{Ll})/gu, (_, before, letter) => before + letter.toUpperCase());
 }
@@ -63,7 +64,7 @@ function readView() {
   return {
     q: capital(p.get("anagrams") ?? p.get("full") ?? (names || bare) ?? ""),
     from: byId.has(p.get("in")) ? p.get("in") : "world",
-    synthetic: p.has("synthetic"),
+    synthetic: !p.has("real"),
   };
 }
 const reloaded = performance.getEntriesByType("navigation")[0]?.type === "reload";
@@ -102,6 +103,14 @@ synthetic.addEventListener("click", () => {
   }
   go(change, true);
 });
+// The text of a first visit (under the question, while no name gives people): a click on a name to try searches it.
+for (const b of $("about").querySelectorAll(".try button")) {
+  b.addEventListener("click", () => {
+    limit = STEP;
+    go({ q: b.textContent });
+    if (matchMedia("(pointer: fine)").matches) input.focus(); // the button goes away; on a phone, no keyboard
+  });
+}
 $("clear").addEventListener("click", () => {
   limit = STEP;
   go({ q: "" });
@@ -212,6 +221,7 @@ async function render(id, model, source) {
   if (key.length < 4) {
     list.replaceChildren();
     $("view").hidden = more.hidden = true;
+    $("about").hidden = false;
     status.textContent = key ? "Type at least 4 letters" : "";
     return;
   }
@@ -224,6 +234,7 @@ async function render(id, model, source) {
     stat(sum.realPeople ? `${n(sum.realPeople)} real ${sum.realPeople === 1 ? "person" : "people"}` : "No real person", where);
   } else stat(sum.found ? `≈ ${about(pop * ranking.mass)} people expected` : "No name", where);
   $("names").textContent = n(view.synthetic ? sum.found : sum.realNames);
+  $("unit").textContent = unitOf();
   headline.dataset.key = `${sum.found}|${sum.realNames}`; // for the tests
   headline.dataset.mode = view.synthetic ? "synthetic" : "real";
   const rows = view.synthetic ? ranking.model(limit) : ranking.real(limit); // synthetic: all the names, as the model sees them
@@ -233,6 +244,7 @@ async function render(id, model, source) {
   rove($("people"), focused);
   more.hidden = rows.length >= (view.synthetic ? sum.found : sum.realNames);
   $("view").hidden = false;
+  $("about").hidden = true;
   if (!more.hidden && near(more)) requestAnimationFrame(() => more.click()); // the screen is not full yet
   await countries(id, query, source);
 }
@@ -241,14 +253,17 @@ async function render(id, model, source) {
  * accounts; with the synthetic names, the names generated too. sum: the summary of the search in the world. */
 function tally(sum) {
   const count = (x, one, many) => [el("b", "", n(x)), ` ${x === 1 ? one : many}`], synthetic = sum.found - sum.realNames;
-  const lines = [el("p", "real", "Found ", ...count(sum.realNames, "real anagraname", "real anagranames")),
-    el("p", "accounts", "on ", ...count(sum.realPeople, "Facebook account", "Facebook accounts"))];
+  const lines = [el("p", "real", "Found ", ...count(sum.realNames, "real anagraname", "real anagranames"),
+    " on ", ...count(sum.realPeople, "Facebook account", "Facebook accounts"))];
   if (view.synthetic) {
     lines.push(el("p", "generated", ...(synthetic ? [...count(synthetic, "synthetic anagraname", "synthetic anagranames"), " generated"]
       : ["No synthetic anagraname generated"])));
   }
   $("tally").replaceChildren(...lines);
 }
+
+/** The unit of the numbers of the two lists, in their headers. */
+const unitOf = () => (view.synthetic ? "People expected" : "Accounts");
 
 /** The number of the view, and its country (the world: no words). */
 function stat(value, where) {
@@ -304,7 +319,8 @@ async function countries(id, query, source) {
   });
   const body = el("div", "pane-body", ...bars), at = $("hist").querySelector(".pane-body")?.scrollTop ?? 0;
   const focused = document.activeElement?.closest?.("#hist .hbar")?.dataset.country; // the keyboard: the same country
-  box.replaceChildren(el("p", "pane-head", span("", "Countries"), span("count", n(rows.length))), body, ...box.querySelectorAll(".sbar"));
+  box.replaceChildren(el("p", "pane-head", span("", "Countries"), span("count", n(rows.length)), span("unit", unitOf())), body,
+    ...box.querySelectorAll(".sbar"));
   fold.mark();
   rove(box, focused ? bars.findIndex((b) => b.dataset.country === focused) : -1);
   body.scrollTop = at; // the same place in the list after a choice, with the chosen country in view

@@ -38,10 +38,10 @@ jobs:
         run: node web/build.mjs
       - name: Python and TypeScript give the same results
         run: uv run --no-project --with numpy python app/parity.py
-      - name: Browser
-        run: uv run --no-project --with playwright==1.64.1 playwright install --with-deps chromium
-      - name: End-to-end tests (Chromium)
-        run: uv run --no-project --with playwright==1.64.1 --with numpy python web/e2e.py
+      - name: Browsers
+        run: uv run --no-project --with playwright==1.64.1 playwright install --with-deps chromium webkit firefox
+      - name: End-to-end tests (Chromium; WebKit, Firefox and phones for the tests of the engines)
+        run: uv run --no-project --with playwright==1.64.1 --with numpy python web/e2e.py --all
       - name: The site
         run: mkdir site && cp -r web/index.html web/how.html web/app.js web/anagram.js web/globe.js web/globe.json web/style.css web/favicon.svg web/favicon-32.png web/apple-touch-icon.png web/fonts web/data site/
       - uses: actions/upload-pages-artifact@v3
