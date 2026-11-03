@@ -557,9 +557,11 @@ def test_fits_the_window(page, base):
             if step == "country":
                 page.click("#hist .hbar >> nth=1")
                 page.wait_for_function("document.querySelector('#hist .hbar.chosen')", timeout=WAIT)
-            page.wait_for_timeout(200)
-            size = page.evaluate("[document.scrollingElement.scrollHeight, innerHeight]")
-            assert size[0] <= size[1], f"{w}x{h}, {step}: the page is {size[0]} px high in a window of {size[1]} px"
+            try:  # the page fits after its resize code (a slow browser, as WebKit on CI: more than 200 ms)
+                page.wait_for_function("document.scrollingElement.scrollHeight <= innerHeight", timeout=5000)
+            except PlaywrightTimeout:
+                size = page.evaluate("[document.scrollingElement.scrollHeight, innerHeight]")
+                raise AssertionError(f"{w}x{h}, {step}: the page is {size[0]} px high in a window of {size[1]} px")
         page.click("#synthetic")  # back to the real people, in the world
         page.wait_for_function("document.getElementById('headline').dataset.mode === 'real'", timeout=WAIT)
         if page.locator("#hist .hbar.chosen").count():
