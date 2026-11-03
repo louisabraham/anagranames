@@ -55,8 +55,10 @@ def main():
         keys = [line.split("\t", 1)[0] for line in open(f"{args.data_dir}/vocab_{side}.tsv", encoding="utf-8")]
         arrays[side] = np.array([counts[k][1] if k in counts else 0 for k in keys], np.int64)
         found = arrays[side] > 0
-        print(f"{side}: {len(counts):,} INSEE names, {found.sum():,} of them in the world vocabulary "
-              f"({arrays[side].sum() / sum(n for _, n in counts.values()):.1%} of the INSEE people)")
+        print(
+            f"{side}: {len(counts):,} INSEE names, {found.sum():,} of them in the world vocabulary "
+            f"({arrays[side].sum() / sum(n for _, n in counts.values()):.1%} of the INSEE people)"
+        )
     np.savez(f"{args.out}/insee_fr.npz", **arrays)
     print(f"{args.out}/insee_fr.npz")
 

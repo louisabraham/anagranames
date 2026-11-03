@@ -172,26 +172,38 @@ class Names:
         ptr = np.searchsorted(local[owner[sel]], np.arange(len(ids) + 1))
         country, count = pack_index[self.country[sel]], self.count[sel]
 
-        order, letters, sizes, ends = signature_trie([self.keys[i] for i in ids], self.total[ids], [self.displays[i] for i in ids],
-                                                     alphabet)
+        order, letters, sizes, ends = signature_trie(
+            [self.keys[i] for i in ids], self.total[ids], [self.displays[i] for i in ids], alphabet
+        )
         lens = np.diff(ptr)[order]
         cells = ranges(ptr[:-1][order], lens)
         rows = self.vec_row[ids[order]]
         ids = ids[order]
         sections = {
-            "letters": letters.tobytes(), "sizes": varints(sizes), "ends": varints(ends),
+            "letters": letters.tobytes(),
+            "sizes": varints(sizes),
+            "ends": varints(ends),
             "names": ("\n".join(self.displays[i] for i in ids) + "\n").encode(),
-            "total": varints(self.total[ids]), "entries": varints(lens),
-            "country": country[cells].astype(np.uint8).tobytes(), "count": varints(count[cells]),
-            "vec": np.packbits(rows >= 0).tobytes(), "codes": self.codes[rows[rows >= 0]].tobytes(),
+            "total": varints(self.total[ids]),
+            "entries": varints(lens),
+            "country": country[cells].astype(np.uint8).tobytes(),
+            "count": varints(count[cells]),
+            "vec": np.packbits(rows >= 0).tobytes(),
+            "codes": self.codes[rows[rows >= 0]].tobytes(),
             "books": self.books.astype("<f4").tobytes(),
         }
-        meta = {"names": len(ids), "nodes": len(letters), "vectors": int((rows >= 0).sum()),
-                "groups": self.books.shape[0], "group_size": self.books.shape[2]}
+        meta = {
+            "names": len(ids),
+            "nodes": len(letters),
+            "vectors": int((rows >= 0).sum()),
+            "groups": self.books.shape[0],
+            "group_size": self.books.shape[2],
+        }
         for k in CHUNK_SECTIONS:
             del sections[k]
-        write_chunks(f"{chunk_dir}/{side}", [self.displays[i] for i in ids], lens, country[cells], count[cells],
-                     rows, self.codes)
+        write_chunks(
+            f"{chunk_dir}/{side}", [self.displays[i] for i in ids], lens, country[cells], count[cells], rows, self.codes
+        )
         meta["chunk"] = CHUNK
         return {f"{side}.{k}": v for k, v in sections.items()}, meta, ids
 
@@ -208,9 +220,14 @@ def write_chunks(out_dir, displays, lens, country, count, rows, codes):
         a, b = c * CHUNK, min((c + 1) * CHUNK, len(displays))
         e = slice(cum[a], cum[b])
         r = rows[a:b]
-        parts = [("\n".join(displays[a:b]) + "\n").encode(), varints(lens[a:b]),
-                 country[e].astype(np.uint8).tobytes(), varints(count[e]), np.packbits(r >= 0).tobytes(),
-                 codes[r[r >= 0]].tobytes()]
+        parts = [
+            ("\n".join(displays[a:b]) + "\n").encode(),
+            varints(lens[a:b]),
+            country[e].astype(np.uint8).tobytes(),
+            varints(count[e]),
+            np.packbits(r >= 0).tobytes(),
+            codes[r[r >= 0]].tobytes(),
+        ]
         with open(f"{out_dir}/{c:04x}.gz", "wb") as fh:
             fh.write(gzip.compress(varints([len(x) for x in parts]) + b"".join(parts), 9, mtime=0))
 
@@ -238,8 +255,13 @@ def check_rows(key, count, n_first, n_last, rng, n=50):
     rows = []
     for k in np.concatenate([some, rand]):
         i = np.searchsorted(key, k)
-        rows.append({"first": int(k // n_last), "last": int(k % n_last),
-                     "real": int(count[i]) if i < len(key) and key[i] == k else 0})
+        rows.append(
+            {
+                "first": int(k // n_last),
+                "last": int(k % n_last),
+                "real": int(count[i]) if i < len(key) and key[i] == k else 0,
+            }
+        )
     return rows
 
 
@@ -279,8 +301,13 @@ def write_parts(out_dir, key, count, country, names, ids):
     os.makedirs(out_dir, exist_ok=True)
     for j in range(PARTS):
         s, e = slice(bounds[j], bounds[j + 1]), slice(cell_bounds[j], cell_bounds[j + 1])
-        data = np.concatenate([[s.stop - s.start], np.stack([d_row[s], d_col[s], size[s] - 1], 1).ravel(),
-                               np.stack([d_c[e], n[e] - 1], 1).ravel()])
+        data = np.concatenate(
+            [
+                [s.stop - s.start],
+                np.stack([d_row[s], d_col[s], size[s] - 1], 1).ravel(),
+                np.stack([d_c[e], n[e] - 1], 1).ravel(),
+            ]
+        )
         with open(f"{out_dir}/{j:03x}.gz", "wb") as fh:
             fh.write(gzip.compress(varints(data), 9, mtime=0))
 
@@ -311,7 +338,9 @@ def world_names(ds, d, data_dir):
     in the data (people 0 when not in the base)."""
     out = {}
     for s, (side, ids, n, vec) in enumerate((("first", ds.f, ds.n_first, "U"), ("last", ds.l, ds.n_last, "V"))):
-        vocab = [line.split("\t") for line in open(f"{data_dir}/vocab_{side}.tsv", encoding="utf-8").read().split("\n")[:-1]]
+        vocab = [
+            line.split("\t") for line in open(f"{data_dir}/vocab_{side}.tsv", encoding="utf-8").read().split("\n")[:-1]
+        ]
         dense = np.bincount(ids.astype(np.int64) * ds.C + ds.c, weights=ds.n_train, minlength=n * ds.C).reshape(n, ds.C)
         total = dense.sum(1)
         present = dense > 0
@@ -320,9 +349,17 @@ def world_names(ds, d, data_dir):
             dense[:, c] = counts[s]
         cells = np.nonzero(present.reshape(-1))[0]
         ptr = np.searchsorted(cells // ds.C, np.arange(n + 1))
-        out[side] = Names([v[0] for v in vocab], [v[1] for v in vocab], [int(v[2]) for v in vocab], ptr,
-                          (cells % ds.C).astype(np.uint8), dense.reshape(-1)[cells].astype(np.int64),
-                          vector_rows(d, vec, n), d[f"{vec}_codes"], d[f"{vec}_codebooks"])
+        out[side] = Names(
+            [v[0] for v in vocab],
+            [v[1] for v in vocab],
+            [int(v[2]) for v in vocab],
+            ptr,
+            (cells % ds.C).astype(np.uint8),
+            dense.reshape(-1)[cells].astype(np.int64),
+            vector_rows(d, vec, n),
+            d[f"{vec}_codes"],
+            d[f"{vec}_codebooks"],
+        )
         assert np.array_equal(total, out[side].total)
     return out
 
@@ -381,8 +418,13 @@ def main():
     rng = np.random.default_rng(0)
     ds = namedata.load(args.data_dir, drop=False)  # all the people: the real full names do not change
     data_filter = json.load(open(f"{args.data_dir}/filter.json"))  # min_first, min_last of prepare_world.py
-    alphabet = letter_order([line.split("\t", 1)[0] for side in ("first", "last")
-                             for line in open(f"{args.data_dir}/vocab_{side}.tsv", encoding="utf-8")])
+    alphabet = letter_order(
+        [
+            line.split("\t", 1)[0]
+            for side in ("first", "last")
+            for line in open(f"{args.data_dir}/vocab_{side}.tsv", encoding="utf-8")
+        ]
+    )
     ds.n_train = ds.n_train + ds.n_valid + ds.n_test  # all people (pm.support and log_marginals read n_train)
     d = np.load(args.world_model)
     names = world_names(ds, d, args.data_dir)
@@ -405,8 +447,9 @@ def main():
         scale = np.ones(ds.C)  # people of the base per person of the data: count * scale + alpha pi
         for c, counts in ds.base.items():
             scale[c] = people[c] / counts[("first", "last").index(side)].sum()
-        meta[side].update(people=people.tolist(), prior_norm=float(names[side].total.sum() + 0.5 * n_all),
-                          scale=scale.tolist())
+        meta[side].update(
+            people=people.tolist(), prior_norm=float(names[side].total.sum() + 0.5 * n_all), scale=scale.tolist()
+        )
     key, count, country = pack_pairs(ds.f, ds.l, ds.n_train, ids, ds.c)
     write_parts(f"{args.out_dir}/world.real", key, count, country, names, ids)
     entries = key, count, country
@@ -417,15 +460,36 @@ def main():
         k = r["first"] * len(ids["last"]) + r["last"]
         i, j = np.searchsorted(entries[0], [k, k + 1])
         r["countries"] = [[ds.countries[c], int(x)] for c, x in zip(entries[2][i:j], entries[1][i:j])]
-    write_pack(f"{args.out_dir}/world.anag.gz", dict(
-        version=VERSION, source="name_dataset", model=os.path.basename(args.world_model), countries=ds.countries,
-        bases={ds.countries[c]: "INSEE" for c in ds.base},
-        people=people.tolist(), population=pop.tolist(), alpha=float(d["alpha"]), log_z=log_z.tolist(),
-        gates=d["G"].astype(np.float64).tolist(), offsets=d["B"].astype(np.float64).tolist(), letters=letters,
-        alphabet=alphabet, pairs=len(key), parts=PARTS, part_hash=PART_HASH.tolist(), **data_filter, **meta), sections)
+    write_pack(
+        f"{args.out_dir}/world.anag.gz",
+        dict(
+            version=VERSION,
+            source="name_dataset",
+            model=os.path.basename(args.world_model),
+            countries=ds.countries,
+            bases={ds.countries[c]: "INSEE" for c in ds.base},
+            people=people.tolist(),
+            population=pop.tolist(),
+            alpha=float(d["alpha"]),
+            log_z=log_z.tolist(),
+            gates=d["G"].astype(np.float64).tolist(),
+            offsets=d["B"].astype(np.float64).tolist(),
+            letters=letters,
+            alphabet=alphabet,
+            pairs=len(key),
+            parts=PARTS,
+            part_hash=PART_HASH.tolist(),
+            **data_filter,
+            **meta,
+        ),
+        sections,
+    )
     json.dump(dict(references(cs, ids, rng), real=check_real), open(f"{args.out_dir}/world.check.json", "w"))
-    print(f"world: {meta['first']['names']:,} first, {meta['last']['names']:,} last names, {len(key):,} real full"
-          f" names, {os.path.getsize(f'{args.out_dir}/world.anag.gz') / 1e6:.1f} MB ({time.time() - t0:.0f}s)", flush=True)
+    print(
+        f"world: {meta['first']['names']:,} first, {meta['last']['names']:,} last names, {len(key):,} real full"
+        f" names, {os.path.getsize(f'{args.out_dir}/world.anag.gz') / 1e6:.1f} MB ({time.time() - t0:.0f}s)",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

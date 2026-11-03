@@ -84,8 +84,17 @@ def with_insee(ds, path, drop=True):
         return replace(ds, base={c: (first, last)})
     keep = (ds.c != c) | ((first[ds.f] > 0) & (last[ds.l] > 0))
     dropped = {k: getattr(ds, k)[~keep] for k in ("f", "l", "n_train", "n_valid", "n_test")}
-    return replace(ds, c=ds.c[keep], f=ds.f[keep], l=ds.l[keep], n_train=ds.n_train[keep], n_valid=ds.n_valid[keep],
-                   n_test=ds.n_test[keep], base={c: (first, last)}, dropped=dropped)
+    return replace(
+        ds,
+        c=ds.c[keep],
+        f=ds.f[keep],
+        l=ds.l[keep],
+        n_train=ds.n_train[keep],
+        n_valid=ds.n_valid[keep],
+        n_test=ds.n_test[keep],
+        base={c: (first, last)},
+        dropped=dropped,
+    )
 
 
 def people(ds):
@@ -108,8 +117,10 @@ def load(data_dir="data", country=None, drop=True):
 
 
 def describe(ds):
-    return (f"{ds.C} countries, {ds.n_first:,} first, {ds.n_last:,} last names, {len(ds.f):,} triples, "
-            f"people train/valid/test {int(ds.n_train.sum()):,}/{int(ds.n_valid.sum()):,}/{int(ds.n_test.sum()):,}")
+    return (
+        f"{ds.C} countries, {ds.n_first:,} first, {ds.n_last:,} last names, {len(ds.f):,} triples, "
+        f"people train/valid/test {int(ds.n_train.sum()):,}/{int(ds.n_valid.sum()):,}/{int(ds.n_test.sum()):,}"
+    )
 
 
 def log_marginals(ds, alpha):

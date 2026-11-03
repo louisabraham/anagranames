@@ -21,10 +21,23 @@ CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 INK, INK2, GRID = "#000000", "#444444", "#e2e2e2"
 BLUE, ORANGE, AQUA, GRAY = "#2a78d6", "#eb6834", "#1baf7a", "#8d8c88"
-plt.rcParams.update({"font.family": "serif", "font.serif": ["cmr10"], "mathtext.fontset": "cm",
-                     "axes.formatter.use_mathtext": True, "axes.unicode_minus": False, "font.size": 9,
-                     "text.color": INK, "axes.labelcolor": INK, "xtick.color": INK2, "ytick.color": INK2,
-                     "axes.edgecolor": "#bbbbbb", "axes.linewidth": 0.6, "svg.fonttype": "path"})
+plt.rcParams.update(
+    {
+        "font.family": "serif",
+        "font.serif": ["cmr10"],
+        "mathtext.fontset": "cm",
+        "axes.formatter.use_mathtext": True,
+        "axes.unicode_minus": False,
+        "font.size": 9,
+        "text.color": INK,
+        "axes.labelcolor": INK,
+        "xtick.color": INK2,
+        "ytick.color": INK2,
+        "axes.edgecolor": "#bbbbbb",
+        "axes.linewidth": 0.6,
+        "svg.fonttype": "path",
+    }
+)
 
 
 def load(name):
@@ -53,19 +66,32 @@ def main():
     small = min((v for v in quant.values() if v["n_stored"]), key=lambda v: v["mb"])
     int8 = loss("int8 per column")
     num = {
-        "gain_cal": f"{total(cal):.3f}", "null_bits": f"{null['test_bits']:.2f}",
-        "gain_shared": f"{total(shared):+.3f}", "below_shared": below(shared),
-        "gain_gated": f"{total(gated):+.3f}", "below_gated": below(gated),
-        "gain_raw": f"{total(raw):+.3f}", "below_raw": below(raw), "below_cal": below(cal),
-        "low_cal": f"{low} (+{gain_cal[low]:.3f})", "train_min": f"{raw['train_s'] / 60:.1f}",
-        "beta_median": f"{np.median(beta):.2f}", "beta_lt1": int((beta < 1).sum()),
-        "mb_fp32": f"{q_fp32['mb']:.0f}", "mb_pq2": f"{quant['PQ 2 dims/byte']['mb']:.0f}",
+        "gain_cal": f"{total(cal):.3f}",
+        "null_bits": f"{null['test_bits']:.2f}",
+        "gain_shared": f"{total(shared):+.3f}",
+        "below_shared": below(shared),
+        "gain_gated": f"{total(gated):+.3f}",
+        "below_gated": below(gated),
+        "gain_raw": f"{total(raw):+.3f}",
+        "below_raw": below(raw),
+        "below_cal": below(cal),
+        "low_cal": f"{low} (+{gain_cal[low]:.3f})",
+        "train_min": f"{raw['train_s'] / 60:.1f}",
+        "beta_median": f"{np.median(beta):.2f}",
+        "beta_lt1": int((beta < 1).sum()),
+        "mb_fp32": f"{q_fp32['mb']:.0f}",
+        "mb_pq2": f"{quant['PQ 2 dims/byte']['mb']:.0f}",
         "loss_int8": f"${int8 / 10 ** np.floor(np.log10(int8)):.1f} \\times 10^{{{int(np.floor(np.log10(int8)))}}}$",
-        "loss_int4": f"{loss('int4 per column'):.3f}", "ratio_int": f"{loss('int4 per column') / int8:.0f}",
-        "loss_pq2": f"{loss('PQ 2 dims/byte'):.4f}", "loss_pq4": f"{loss('PQ 4 dims/byte'):.3f}",
-        "loss_pq8": f"{loss('PQ 8 dims/byte'):.3f}", "mb_top50": f"{quant['int4, top 50% of names']['mb']:.1f}",
-        "loss_top50": f"{loss('int4, top 50% of names'):.3f}", "file_mb": f"{exp['file_mb']:.1f}",
-        "gain_file": f"{exp_null['test_bits'] - exp['test_bits']:.3f}", "mb_small": f"{small['mb']:.1f}",
+        "loss_int4": f"{loss('int4 per column'):.3f}",
+        "ratio_int": f"{loss('int4 per column') / int8:.0f}",
+        "loss_pq2": f"{loss('PQ 2 dims/byte'):.4f}",
+        "loss_pq4": f"{loss('PQ 4 dims/byte'):.3f}",
+        "loss_pq8": f"{loss('PQ 8 dims/byte'):.3f}",
+        "mb_top50": f"{quant['int4, top 50% of names']['mb']:.1f}",
+        "loss_top50": f"{loss('int4, top 50% of names'):.3f}",
+        "file_mb": f"{exp['file_mb']:.1f}",
+        "gain_file": f"{exp_null['test_bits'] - exp['test_bits']:.3f}",
+        "mb_small": f"{small['mb']:.1f}",
         "gain_small": f"{q_null['test_bits'] - small['test_bits']:.3f}",
     }
     assert exp["below_null"] == 0 and below(cal) == 0
@@ -80,8 +106,18 @@ def main():
     with open(f"{tmp}/world_model.html", "w") as fh:
         fh.write(html)
     out = f"{ROOT}/docs/world_model.pdf"
-    subprocess.run([CHROME, "--headless", "--no-pdf-header-footer", "--virtual-time-budget=20000",
-                    f"--print-to-pdf={out}", f"file://{tmp}/world_model.html"], check=True, capture_output=True)
+    subprocess.run(
+        [
+            CHROME,
+            "--headless",
+            "--no-pdf-header-footer",
+            "--virtual-time-budget=20000",
+            f"--print-to-pdf={out}",
+            f"file://{tmp}/world_model.html",
+        ],
+        check=True,
+        capture_output=True,
+    )
     shutil.rmtree(tmp)
     print(f"saved {out}")
 
@@ -115,8 +151,12 @@ def plot_countries(gain_raw, gain_cal, path, n=25):
 
 def plot_quant(quant, q_null, path):
     groups = [
-        ("scalar", BLUE, "o", [("float32", "fp32"), ("float16", "fp16"), ("int8 per column", "int8"),
-                                ("int4 per column", "int4")]),
+        (
+            "scalar",
+            BLUE,
+            "o",
+            [("float32", "fp32"), ("float16", "fp16"), ("int8 per column", "int8"), ("int4 per column", "int4")],
+        ),
         ("product quantization", ORANGE, "s", [(f"PQ {g} dims/byte", f"$g={g}$") for g in (2, 4, 8)]),
         ("int4, top names", AQUA, "^", [(f"int4, top {p}% of names", f"top {p}%") for p in (50, 25, 10, 5)]),
     ]
@@ -150,12 +190,28 @@ def place_labels(fig, ax, points):
     dots = [ax.transData.transform((x, y)) for _, x, y in points]
     taken = [ax.get_legend().get_window_extent(r)]
     frame = ax.get_window_extent(r)
-    offsets = [(5, -3, "left"), (-5, -3, "right"), (4, 5, "left"), (4, -11, "left"), (-4, 5, "right"),
-               (-4, -11, "right"), (0, 7, "center"), (0, -13, "center")]
+    offsets = [
+        (5, -3, "left"),
+        (-5, -3, "right"),
+        (4, 5, "left"),
+        (4, -11, "left"),
+        (-4, 5, "right"),
+        (-4, -11, "right"),
+        (0, 7, "center"),
+        (0, -13, "center"),
+    ]
     for name, x, y in points:
         for dx, dy, ha in offsets:
-            t = ax.annotate(name, (x, y), xytext=(dx, dy), textcoords="offset points", ha=ha, fontsize=7.5,
-                            color=INK2, bbox=dict(boxstyle="square,pad=0.05", fc="white", ec="none"))
+            t = ax.annotate(
+                name,
+                (x, y),
+                xytext=(dx, dy),
+                textcoords="offset points",
+                ha=ha,
+                fontsize=7.5,
+                color=INK2,
+                bbox=dict(boxstyle="square,pad=0.05", fc="white", ec="none"),
+            )
             box = t.get_window_extent(r).expanded(1.04, 1.1)
             hit = any(box.overlaps(b) for b in taken) or any(box.contains(*p) for p in dots)
             hit |= not (frame.contains(box.x0, box.y0) and frame.contains(box.x1, box.y1))

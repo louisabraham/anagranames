@@ -96,9 +96,7 @@ def sort_first(item):
 
 
 if __name__ == "__main__":
-    best = sorted(
-        list(find_anagram_pair("elena Ourgaud")), key=sort_joint, reverse=True
-    )
+    best = sorted(list(find_anagram_pair("elena Ourgaud")), key=sort_joint, reverse=True)
     for firstname, lastname in best:
         print(firstname.title(), lastname.title())
 # %%

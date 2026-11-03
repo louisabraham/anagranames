@@ -45,7 +45,9 @@ def null_histogram(model, ds, c, in_f, in_l, X, Y):
     lo, hi = np.inf, -np.inf
     chunk = max(8, 2**26 // len(li))
     for i in range(0, len(fi), chunk):
-        a, b, smin, smax = _chunk_hist(Uc[i:i + chunk], Vc, mx.array((px[fi[i:i + chunk]] / sx).astype(np.float32))[:, None], wy)
+        a, b, smin, smax = _chunk_hist(
+            Uc[i : i + chunk], Vc, mx.array((px[fi[i : i + chunk]] / sx).astype(np.float32))[:, None], wy
+        )
         h0 += np.array(a, dtype=np.float64)
         h1 += np.array(b, dtype=np.float64)
         lo, hi = min(lo, smin.item()), max(hi, smax.item())
@@ -112,12 +114,17 @@ def main():
         gt_fit = gains(h0, h1, p_out, es_t, pin_t, bv)[0][k]
         raw[c], cal[c] = gt_raw, gt_fit
         people[c] = ds.n_test[slice(*np.searchsorted(ds.c, [c, c + 1]))].sum()
-        print(f"{ds.countries[c]:<3} {beta[c]:5.2f} {offset[c]:+6.2f}  {gv[i1] / np.log(2):+.3f} -> {gv[k] / np.log(2):+.3f}"
-              f"   {gt_raw / np.log(2):+.3f} -> {gt_fit / np.log(2):+.3f}", flush=True)
+        print(
+            f"{ds.countries[c]:<3} {beta[c]:5.2f} {offset[c]:+6.2f}  {gv[i1] / np.log(2):+.3f} -> {gv[k] / np.log(2):+.3f}"
+            f"   {gt_raw / np.log(2):+.3f} -> {gt_fit / np.log(2):+.3f}",
+            flush=True,
+        )
     w = people / people.sum()
-    print(f"test gain (bits/person): raw {np.sum(w * raw) / np.log(2):+.4f}, calibrated {np.sum(w * cal) / np.log(2):+.4f}; "
-          f"countries below the null: raw {int((raw < 0).sum())}, calibrated {int((cal < 0).sum())} "
-          f"({time.time() - t0:.0f}s)")
+    print(
+        f"test gain (bits/person): raw {np.sum(w * raw) / np.log(2):+.4f}, calibrated {np.sum(w * cal) / np.log(2):+.4f}; "
+        f"countries below the null: raw {int((raw < 0).sum())}, calibrated {int((cal < 0).sum())} "
+        f"({time.time() - t0:.0f}s)"
+    )
     d = dict(np.load(args.model))
     d["G"] = np.array(model.G) * beta[:, None].astype(np.float32)
     d["B"] = offset.astype(np.float32)

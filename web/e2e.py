@@ -97,12 +97,17 @@ def check_message(page, query, synthetic):
     names; with the synthetic names, the names generated too."""
     w = expected("world", query, 0)
     rn, rp, z = w["real_names"], w["real_people"], w["found"] - w["real_names"]
-    real = [f"Found {n(rn)} real anagraname{'' if rn == 1 else 's'} on {n(rp)} Facebook account{'' if rp == 1 else 's'}"]
+    real = [
+        f"Found {n(rn)} real anagraname{'' if rn == 1 else 's'} on {n(rp)} Facebook account{'' if rp == 1 else 's'}"
+    ]
     gen = f"{n(z)} synthetic anagraname{'s' if z > 1 else ''} generated" if z else "No synthetic anagraname generated"
     want = real + [gen] if synthetic else real
     try:
-        page.wait_for_function("w => JSON.stringify([...document.querySelectorAll('#tally p')].map((p) => p.textContent)) === w",
-                               arg=json.dumps(want, separators=(",", ":"), ensure_ascii=False), timeout=WAIT)
+        page.wait_for_function(
+            "w => JSON.stringify([...document.querySelectorAll('#tally p')].map((p) => p.textContent)) === w",
+            arg=json.dumps(want, separators=(",", ":"), ensure_ascii=False),
+            timeout=WAIT,
+        )
     except PlaywrightTimeout:
         lines = page.eval_on_selector_all("#tally p", "ps => ps.map((p) => p.textContent)")
         raise AssertionError(f"message {lines}, expected {want}")
@@ -117,11 +122,16 @@ def check_list(page, source, query, synthetic=False, limit=50):
     want = res["results"][:limit] if synthetic else [r for r in res["results"] if r["real"]][:limit]
     mode = "synthetic" if synthetic else "real"
     try:
-        page.wait_for_function("([k, m]) => { const h = document.getElementById('headline'); return h.dataset.key === k && h.dataset.mode === m; }",
-                               arg=[f"{res['found']}|{res['real_names']}", mode], timeout=WAIT)
+        page.wait_for_function(
+            "([k, m]) => { const h = document.getElementById('headline'); return h.dataset.key === k && h.dataset.mode === m; }",
+            arg=[f"{res['found']}|{res['real_names']}", mode],
+            timeout=WAIT,
+        )
     except PlaywrightTimeout:
-        raise AssertionError(f"headline {page.text_content('#headline')!r}, status {page.text_content('#status')!r} after"
-                             f" {WAIT // 1000} s, expected {res['found']} names, {res['real_names']} real, {mode}")
+        raise AssertionError(
+            f"headline {page.text_content('#headline')!r}, status {page.text_content('#status')!r} after"
+            f" {WAIT // 1000} s, expected {res['found']} names, {res['real_names']} real, {mode}"
+        )
     headline = page.text_content("#headline")
     if not synthetic and res["real_people"]:
         label = f"{n(res['real_people'])} real {'person' if res['real_people'] == 1 else 'people'}"
@@ -133,9 +143,12 @@ def check_list(page, source, query, synthetic=False, limit=50):
         total = pop * sum(math.exp(r["log_p"]) for r in everyone)
         shown = page.text_content("#headline .big").split(" people")[0]
         assert close(shown, total), f"headline {headline!r}, expected about {total:.3g} people"
-    shown = page.eval_on_selector_all("#results li", """lis => lis.map((li) => ({
+    shown = page.eval_on_selector_all(
+        "#results li",
+        """lis => lis.map((li) => ({
         name: li.querySelector('.first').textContent + ' ' + li.querySelector('.last').textContent,
-        value: li.querySelector('.value').textContent, tag: li.querySelector('.tag.real')?.textContent ?? ''}))""")
+        value: li.querySelector('.value').textContent, tag: li.querySelector('.tag.real')?.textContent ?? ''}))""",
+    )
     assert len(shown) == len(want), f"{len(shown)} people shown, expected {len(want)}"
     for i, (row, r) in enumerate(zip(shown, want), 1):
         assert row["name"] == f"{r['first']} {r['last']}", f"{i}: {row['name']!r}, expected {r['first']} {r['last']}"
@@ -152,7 +165,11 @@ def check_list(page, source, query, synthetic=False, limit=50):
 def link(base, query="", pack="world", synthetic=False):
     """The address of a view: ?Yuki+Tanaka, with &in=JP for a source other than the world, &real for the real people
     only (the synthetic people are the default of the page)."""
-    parts = ([quote_plus(query)] if query else []) + ([f"in={pack}"] if pack != "world" else []) + ([] if synthetic else ["real"])
+    parts = (
+        ([quote_plus(query)] if query else [])
+        + ([f"in={pack}"] if pack != "world" else [])
+        + ([] if synthetic else ["real"])
+    )
     return f"{base}/?{'&'.join(parts)}" if parts else f"{base}/"
 
 
@@ -167,10 +184,13 @@ def wait_hist(page):
 
 
 def bars(page):
-    return page.eval_on_selector_all("#hist .hbar", "bs => bs.map((b) => [b.dataset.country, b.querySelector('.tip').textContent])")
+    return page.eval_on_selector_all(
+        "#hist .hbar", "bs => bs.map((b) => [b.dataset.country, b.querySelector('.tip').textContent])"
+    )
 
 
 # ---------- tests: each gets a new page (empty cache) and the address of the server ----------
+
 
 def test_about(page, base):
     """A first visit: the synthetic people (the default), and a text under the question that says what the page does;
@@ -278,9 +298,14 @@ def test_you(page, base):
     check_list(page, "world", "Louis Abraham")
     page.locator("#more").scroll_into_view_if_needed()
     page.wait_for_function("document.querySelectorAll('#results li').length === 85", timeout=WAIT)
-    tags = page.eval_on_selector_all("#results li.you", "ls => ls.map((l) => l.querySelector('.first').textContent + ' ' + l.querySelector('.last').textContent)")
+    tags = page.eval_on_selector_all(
+        "#results li.you",
+        "ls => ls.map((l) => l.querySelector('.first').textContent + ' ' + l.querySelector('.last').textContent)",
+    )
     assert tags == ["Louis Abraham"], f"the color of your name is on {tags}"
-    colors = page.evaluate("""[...document.querySelectorAll('#results li')].slice(0, 3).map((l) => getComputedStyle(l.querySelector('.name')).color)""")
+    colors = page.evaluate(
+        """[...document.querySelectorAll('#results li')].slice(0, 3).map((l) => getComputedStyle(l.querySelector('.name')).color)"""
+    )
     assert len(set(colors)) == 2, f"your name has the color of the others: {colors}"
 
 
@@ -298,7 +323,7 @@ def test_histogram(page, base):
         for c, x in r["real_countries"]:
             count[c] += x
     shown = bars(page)
-    want = [[c, n(x)] for c, x in sorted(count.items(), key=lambda t: (-t[1], t[0]))][:len(shown)]
+    want = [[c, n(x)] for c, x in sorted(count.items(), key=lambda t: (-t[1], t[0]))][: len(shown)]
     assert shown == want, f"real people per country: {shown[:4]}, expected {want[:4]}"
     page.click("#hist .hbar[data-country='JP']")
     check_list(page, "JP", q)
@@ -320,7 +345,10 @@ def test_synthetic_nowhere_real(page, base):
     in South Korea) is not a synthetic person of South Korea."""
     start(page, base, "Daniel Huynh", "KR", synthetic=True)
     check_list(page, "KR", "Daniel Huynh", synthetic=True)
-    names = page.eval_on_selector_all("#results li", "ls => ls.map((l) => l.querySelector('.first').textContent + ' ' + l.querySelector('.last').textContent)")
+    names = page.eval_on_selector_all(
+        "#results li",
+        "ls => ls.map((l) => l.querySelector('.first').textContent + ' ' + l.querySelector('.last').textContent)",
+    )
     assert "Daniel Huynh" not in names, f"a real name in the synthetic people of South Korea: {names[:5]}"
 
 
@@ -399,7 +427,9 @@ def test_keyboard(page, base):
     page.keyboard.press("End")
     page.wait_for_function("document.querySelectorAll('#results li').length > 50", timeout=WAIT)
     page.wait_for_timeout(300)
-    assert page.evaluate("document.activeElement.closest('#results') !== null"), "the focus leaves the list when the next names load"
+    assert page.evaluate("document.activeElement.closest('#results') !== null"), (
+        "the focus leaves the list when the next names load"
+    )
 
 
 def test_keys(page, base):
@@ -441,7 +471,9 @@ def test_keys(page, base):
     box = page.locator("#globe canvas").bounding_box()
     page.mouse.click(box["x"] + 6, box["y"] + 6)  # a click on the globe (out of the sphere), then the arrows
     page.keyboard.press("ArrowRight")
-    assert page.evaluate("document.activeElement.closest('#results') !== null"), "Arrow Right after a click on the globe: not the names"
+    assert page.evaluate("document.activeElement.closest('#results') !== null"), (
+        "Arrow Right after a click on the globe: not the names"
+    )
 
 
 def test_switch_country(page, base):
@@ -474,22 +506,30 @@ def test_rows(page, base):
     check_list(page, "world", "Sayuli Drouard", synthetic=True)
     wait_hist(page)
     for box in ("#hist", "#results"):
-        lefts = page.eval_on_selector_all(f"{box} .htrack", "ts => ts.map((t) => Math.round(t.getBoundingClientRect().left))")
+        lefts = page.eval_on_selector_all(
+            f"{box} .htrack", "ts => ts.map((t) => Math.round(t.getBoundingClientRect().left))"
+        )
         assert len(set(lefts)) == 1, f"{box}: the bars start at {sorted(set(lefts))}"
     first = page.get_attribute("#hist .hbar >> nth=0", "data-country")
     page.click(f"#hist .hbar[data-country='{first}']")
     page.wait_for_function("document.querySelector('#hist .hbar.chosen')", timeout=WAIT)
     colors = page.evaluate("""(() => { const b = document.querySelector('#hist .hbar.chosen');
         return [getComputedStyle(b.querySelector('.tip')).color, getComputedStyle(b).backgroundColor, b.querySelector('.tip').textContent]; })()""")
-    assert colors[0] != colors[1] and colors[2], f"the number of the chosen country: {colors[2]!r} in {colors[0]} on {colors[1]}"
+    assert colors[0] != colors[1] and colors[2], (
+        f"the number of the chosen country: {colors[2]!r} in {colors[0]} on {colors[1]}"
+    )
     start(page, base, "Hong Kong")
     page.wait_for_function("document.getElementById('headline').dataset.key", timeout=WAIT)
-    page.wait_for_function("document.querySelector('#hist .hbar') || document.getElementById('hist').dataset.mode", timeout=WAIT)
+    page.wait_for_function(
+        "document.querySelector('#hist .hbar') || document.getElementById('hist').dataset.mode", timeout=WAIT
+    )
     page.click("#synthetic")
     wait_hist(page)
     page.wait_for_function("document.getElementById('hist').dataset.mode === 'synthetic'", timeout=WAIT)
     names = page.eval_on_selector_all("#hist .hname", "ns => ns.map((n) => n.textContent)")
-    assert "Hong Kong" in names and not [x for x in names if "SAR" in x], f"names: {[x for x in names if 'Hong' in x or 'SAR' in x]}"
+    assert "Hong Kong" in names and not [x for x in names if "SAR" in x], (
+        f"names: {[x for x in names if 'Hong' in x or 'SAR' in x]}"
+    )
 
 
 def test_headers_stay(page, base):
@@ -520,7 +560,9 @@ def test_headers_stay(page, base):
         page.mouse.up()
         moved = page.evaluate(f"document.querySelector('{box} .pane-body').scrollTop")
         assert moved > 100, f"{box}: a drag of the rectangle scrolls the list {moved} px"
-    widths = page.evaluate("['#hist', '#people'].map((q) => Math.round(document.querySelector(q).getBoundingClientRect().width))")
+    widths = page.evaluate(
+        "['#hist', '#people'].map((q) => Math.round(document.querySelector(q).getBoundingClientRect().width))"
+    )
     assert abs(widths[0] - widths[1]) <= 1, f"the two lists are {widths} px wide"
 
 
@@ -579,10 +621,13 @@ def test_globe(page, base):
     check_list(page, "world", q)
     page.wait_for_function("document.getElementById('globe').globe", timeout=WAIT)
     try:
-        page.wait_for_function("""(() => { const c = document.querySelector('#globe canvas');
+        page.wait_for_function(
+            """(() => { const c = document.querySelector('#globe canvas');
             if (!c.width || !c.height) return false;
             const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-            let n = 0; for (let i = 3; i < d.length; i += 16) n += d[i] > 0; return n > 1000; })()""", timeout=WAIT)
+            let n = 0; for (let i = 3; i < d.length; i += 16) n += d[i] > 0; return n > 1000; })()""",
+            timeout=WAIT,
+        )
     except PlaywrightTimeout:
         raise AssertionError("the globe is not drawn")
     page.click("#hist .hbar[data-country='JP']")
@@ -604,8 +649,12 @@ def test_globe(page, base):
     page.wait_for_function("document.getElementById('globe').dataset.hover === 'CN'", timeout=WAIT)
     page.wait_for_function("document.querySelector('.globe-tip').textContent.includes('China')", timeout=WAIT)
     dot = page.evaluate("document.getElementById('globe').globe.where('CN')")
-    tip = page.evaluate("(() => { const t = document.querySelector('.globe-tip'); return [t.offsetLeft, t.offsetTop, t.offsetWidth, t.offsetHeight]; })()")
-    assert not (tip[0] <= dot["x"] <= tip[0] + tip[2] and tip[1] <= dot["y"] <= tip[1] + tip[3]), f"the box {tip} covers the country {dot}"
+    tip = page.evaluate(
+        "(() => { const t = document.querySelector('.globe-tip'); return [t.offsetLeft, t.offsetTop, t.offsetWidth, t.offsetHeight]; })()"
+    )
+    assert not (tip[0] <= dot["x"] <= tip[0] + tip[2] and tip[1] <= dot["y"] <= tip[1] + tip[3]), (
+        f"the box {tip} covers the country {dot}"
+    )
     path = f"{SHOTS}/{page.context.browser.browser_type.name}-globe.png"
     page.locator("#globe").screenshot(path=path)
     page.mouse.click(*place("CN"))
@@ -639,7 +688,9 @@ def test_globe(page, base):
     page.mouse.up()
     turned = page.evaluate("document.getElementById('globe').globe.lon") - lon
     want = 100 / (r * 3.141592653589793 / 180)
-    assert abs(turned - want) < 0.15 * want, f"a drag of 100 px turns the globe {turned:.1f} degrees, expected {want:.1f}"
+    assert abs(turned - want) < 0.15 * want, (
+        f"a drag of 100 px turns the globe {turned:.1f} degrees, expected {want:.1f}"
+    )
     return f"screenshot of the globe: {path}"
 
 
@@ -653,9 +704,11 @@ def check_globe(page, label):
     """The globe fills its box at the size of the screen: the canvas has the size of the box (in pixels of the
     screen), the globe is a circle in the middle of it, and it is drawn (on the screen: else it draws no frames)."""
     try:
-        page.wait_for_function("""(() => { const b = document.getElementById('globe'), c = b.querySelector('canvas');
+        page.wait_for_function(
+            """(() => { const b = document.getElementById('globe'), c = b.querySelector('canvas');
             return b.globe && Math.abs(c.width / devicePixelRatio - b.clientWidth) < 1.5 && Math.abs(c.height / devicePixelRatio - b.clientHeight) < 1.5; })()""",
-                               timeout=WAIT)
+            timeout=WAIT,
+        )
     except PlaywrightTimeout:
         raise AssertionError(f"{label}: the canvas does not follow its box: {page.evaluate(GLOBE)}")
     page.evaluate("document.getElementById('globe').scrollIntoView({ block: 'center' })")  # off the screen: no frames
@@ -667,7 +720,9 @@ def check_globe(page, label):
     small = min(m["w"], m["h"])
     assert m["w"] >= 200 and m["h"] >= 200, f"{label}: the globe is {m['w']}x{m['h']} px"
     assert small / 2 - 30 <= m["R"] <= small / 2, f"{label}: radius {m['R']:.0f} px in a box of {m['w']}x{m['h']} px"
-    assert abs(m["cx"] - m["w"] / 2) < 1 and abs(m["cy"] - m["h"] / 2) < 1, f"{label}: the globe is not in the middle: {m}"
+    assert abs(m["cx"] - m["w"] / 2) < 1 and abs(m["cy"] - m["h"] / 2) < 1, (
+        f"{label}: the globe is not in the middle: {m}"
+    )
     assert m["lit"] > 200, f"{label}: the globe is not drawn ({m['lit']} points)"
 
 
@@ -682,16 +737,24 @@ def test_globe_resize(page, base):
         check_globe(page, f"{w}x{h}")
         page.evaluate("document.getElementById('globe').scrollIntoView({ block: 'center' })")
         box = page.locator("#globe").bounding_box()
-        where = page.evaluate("document.getElementById('globe').globe.where('FR') || document.getElementById('globe').globe.where('DE')")
+        where = page.evaluate(
+            "document.getElementById('globe').globe.where('FR') || document.getElementById('globe').globe.where('DE')"
+        )
         if where:
             page.mouse.move(box["x"] + where["x"], box["y"] + where["y"])
             try:
                 page.wait_for_function("!document.querySelector('.globe-tip').hidden", timeout=WAIT)
             except PlaywrightTimeout:
-                raise AssertionError(f"{w}x{h}: no box of the country under the pointer (hover {page.get_attribute('#globe', 'data-hover')!r})")
+                raise AssertionError(
+                    f"{w}x{h}: no box of the country under the pointer (hover {page.get_attribute('#globe', 'data-hover')!r})"
+                )
             tip = page.locator(".globe-tip").bounding_box()
-            inside = tip["x"] >= box["x"] - 1 and tip["y"] >= box["y"] - 1 and tip["x"] + tip["width"] <= box["x"] + box["width"] + 1 \
+            inside = (
+                tip["x"] >= box["x"] - 1
+                and tip["y"] >= box["y"] - 1
+                and tip["x"] + tip["width"] <= box["x"] + box["width"] + 1
                 and tip["y"] + tip["height"] <= box["y"] + box["height"] + 1
+            )
             assert inside, f"{w}x{h}: the box of the country {tip} is out of the globe {box}"
             page.mouse.move(0, 0)
 
@@ -726,8 +789,12 @@ def test_reload_resets(page, base):
     page.evaluate("scrollTo(0, 500)")
     page.reload()
     page.wait_for_function("document.body.dataset.ready", timeout=WAIT)
-    state = page.evaluate("[document.getElementById('q').value, document.getElementById('view').hidden, scrollY, document.getElementById('synthetic').getAttribute('aria-checked')]")
-    assert state == ["", True, 0, "true"], f"after a reload: field {state[0]!r}, view hidden {state[1]}, scroll {state[2]}, switch {state[3]}"
+    state = page.evaluate(
+        "[document.getElementById('q').value, document.getElementById('view').hidden, scrollY, document.getElementById('synthetic').getAttribute('aria-checked')]"
+    )
+    assert state == ["", True, 0, "true"], (
+        f"after a reload: field {state[0]!r}, view hidden {state[1]}, scroll {state[2]}, switch {state[3]}"
+    )
 
 
 def test_new_build(page, base):
@@ -751,15 +818,47 @@ def test_error_shown(page, base):
     page.wait_for_function("document.getElementById('status').textContent.startsWith('Error: 503')", timeout=WAIT)
 
 
-TESTS = [test_about, test_type_world, test_address, test_switch, test_country, test_country_in_world, test_you,
-         test_histogram, test_synthetic_nowhere_real, test_real_among_synthetic, test_names_whole, test_keyboard, test_keys,
-         test_switch_country, test_rows, test_headers_stay, test_definition, test_fits_the_window, test_globe,
-         test_globe_resize, test_scroll_more, test_fast_typing_and_clear, test_reload_resets, test_new_build,
-         test_error_shown]
+TESTS = [
+    test_about,
+    test_type_world,
+    test_address,
+    test_switch,
+    test_country,
+    test_country_in_world,
+    test_you,
+    test_histogram,
+    test_synthetic_nowhere_real,
+    test_real_among_synthetic,
+    test_names_whole,
+    test_keyboard,
+    test_keys,
+    test_switch_country,
+    test_rows,
+    test_headers_stay,
+    test_definition,
+    test_fits_the_window,
+    test_globe,
+    test_globe_resize,
+    test_scroll_more,
+    test_fast_typing_and_clear,
+    test_reload_resets,
+    test_new_build,
+    test_error_shown,
+]
 # WebKit and Firefox run only the tests of what the engines do in different ways (layout, focus and keys, pointer,
 # scroll, canvas, Intl): the search and the numbers come from the same code in all browsers.
-ENGINE = {test_about, test_names_whole, test_keyboard, test_keys, test_rows, test_headers_stay, test_definition,
-          test_fits_the_window, test_globe, test_scroll_more}
+ENGINE = {
+    test_about,
+    test_names_whole,
+    test_keyboard,
+    test_keys,
+    test_rows,
+    test_headers_stay,
+    test_definition,
+    test_fits_the_window,
+    test_globe,
+    test_scroll_more,
+}
 EXPECT_ERRORS = {test_error_shown}
 
 
@@ -788,11 +887,13 @@ MEASURE = """() => {
   return out;
 }"""
 READY = "document.getElementById('headline').dataset.key && document.querySelector('#hist .hbar')"
-LAYOUT = [("empty", "/", "document.body.dataset.ready"),
-          ("real people", "/?Louis+Abraham&real", READY),
-          ("synthetic people", "/?Louis+Abraham", READY),
-          ("a country", "/?Yuki+Tanaka&in=JP", READY),
-          ("how it works", "/how.html", "document.readyState === 'complete'")]
+LAYOUT = [
+    ("empty", "/", "document.body.dataset.ready"),
+    ("real people", "/?Louis+Abraham&real", READY),
+    ("synthetic people", "/?Louis+Abraham", READY),
+    ("a country", "/?Yuki+Tanaka&in=JP", READY),
+    ("how it works", "/how.html", "document.readyState === 'complete'"),
+]
 
 
 def test_mobile_layout(page, base):
@@ -806,14 +907,18 @@ def test_mobile_layout(page, base):
         if name == "how it works":
             page.evaluate("document.querySelectorAll('details').forEach((d) => (d.open = true))")
         m = page.evaluate(MEASURE)
-        assert m["width"] <= m["vw"], f"{name}: the page is {m['width']} px wide on a screen of {m['vw']} px: {m['wide'][:4]}"
+        assert m["width"] <= m["vw"], (
+            f"{name}: the page is {m['width']} px wide on a screen of {m['vw']} px: {m['wide'][:4]}"
+        )
         assert not m["wide"], f"{name}: wider than the screen: {m['wide'][:4]}"
         assert not m["inputs"], f"{name}: text smaller than 16 px in {m['inputs']}"
         assert not m["controls"], f"{name}: controls smaller than 44 px: {m['controls'][:6]}"
         assert not m["links"], f"{name}: links smaller than 32 px: {m['links'][:6]}"
         if ready == READY:
             if m["vw"] < 700:  # a phone: the list of the countries starts folded, the globe open
-                folded = page.evaluate("['.globe-pane', '#hist'].map((s) => document.querySelector(s).classList.contains('folded'))")
+                folded = page.evaluate(
+                    "['.globe-pane', '#hist'].map((s) => document.querySelector(s).classList.contains('folded'))"
+                )
                 assert folded == [False, True], f"{name}: on a phone, folded at first (globe, countries): {folded}"
             check_globe(page, name)
         page.evaluate("scrollTo(0, document.scrollingElement.scrollHeight)")
@@ -830,7 +935,9 @@ def test_mobile_flow(page, base):
     page.tap("#term")  # the definition: a tap opens it, in the screen; a tap elsewhere closes it
     page.wait_for_selector("#entry", state="visible", timeout=WAIT)
     box = page.locator("#entry").bounding_box()
-    assert box["x"] >= 0 and box["x"] + box["width"] <= page.viewport_size["width"] + 1, f"the definition is out of the screen: {box}"
+    assert box["x"] >= 0 and box["x"] + box["width"] <= page.viewport_size["width"] + 1, (
+        f"the definition is out of the screen: {box}"
+    )
     page.tap("h1", position={"x": 4, "y": 4})  # a tap outside the card (it covers the field)
     page.wait_for_selector("#entry", state="hidden", timeout=WAIT)
     page.tap("#q")
@@ -873,17 +980,25 @@ def test_mobile_globe(page, base):
     def swipe(x, y, dx, dy):  # 10 steps of (dx, dy)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
         for i in range(1, 11):
-            cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x + dx * i, "y": y + dy * i}]})
+            cdp.send(
+                "Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x + dx * i, "y": y + dy * i}]}
+            )
             page.wait_for_timeout(16)
         cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         page.wait_for_timeout(300)
-        return page.evaluate("[document.getElementById('globe').globe.lat, document.getElementById('globe').globe.lon, scrollY]")
+        return page.evaluate(
+            "[document.getElementById('globe').globe.lat, document.getElementById('globe').globe.lon, scrollY]"
+        )
 
     box = page.locator("#globe canvas").bounding_box()
-    before = page.evaluate("[document.getElementById('globe').globe.lat, document.getElementById('globe').globe.lon, scrollY]")
+    before = page.evaluate(
+        "[document.getElementById('globe').globe.lat, document.getElementById('globe').globe.lon, scrollY]"
+    )
     after = swipe(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, -4, 6)
     assert after[0] > before[0] + 2, f"a swipe down does not turn the globe: latitude {before[0]:.1f} -> {after[0]:.1f}"
-    assert after[1] > before[1] + 1, f"a swipe across does not turn the globe: longitude {before[1]:.1f} -> {after[1]:.1f}"
+    assert after[1] > before[1] + 1, (
+        f"a swipe across does not turn the globe: longitude {before[1]:.1f} -> {after[1]:.1f}"
+    )
     assert after[2] == before[2], f"the page scrolls under the globe: {before[2]} -> {after[2]}"
     before = after  # a corner of the box, outside the globe: the finger goes up, the page scrolls down
     after = swipe(box["x"] + 6, box["y"] + box["height"] - 6, 0, -12)
@@ -911,11 +1026,15 @@ def test_mobile_fold(page, base):
     assert not folded(), f"after a tap on the header, the countries are folded (phone: {phone})"
     if not phone:
         return
-    assert page.get_attribute("#hist .pane-head", "aria-expanded") == "true", "the header does not say that the list is open"
+    assert page.get_attribute("#hist .pane-head", "aria-expanded") == "true", (
+        "the header does not say that the list is open"
+    )
     page.tap("#hist .pane-head")
     page.wait_for_timeout(300)
     assert folded(), "a tap again does not fold the countries"
-    assert page.get_attribute("#hist .pane-head", "aria-expanded") == "false", "the header does not say that the list is folded"
+    assert page.get_attribute("#hist .pane-head", "aria-expanded") == "false", (
+        "the header does not say that the list is folded"
+    )
     page.tap("#synthetic")
     check_list(page, "world", "Yuki Tanaka", synthetic=True)
     assert folded(), "the list of the countries opens again when it changes"
@@ -948,8 +1067,11 @@ def run(browser, base, test, shots, device=None):
         path = f"{shots}/{browser.browser_type.name}-{test.__name__}{'-' + str(device['viewport']['width']) if device else ''}.png"
         page.screenshot(path=path, full_page=True)
         waits = [f"{r.url.replace(base, '')} ({time.time() - t0:.0f} s)" for r, t0 in pending.items()]
-        return False, (f"{e}\n      screenshot: {path}" + (f"\n      also: {'; '.join(errors)}" if errors else "")
-                       + (f"\n      no answer yet: {', '.join(waits[:6])}" if waits else ""))
+        return False, (
+            f"{e}\n      screenshot: {path}"
+            + (f"\n      also: {'; '.join(errors)}" if errors else "")
+            + (f"\n      no answer yet: {', '.join(waits[:6])}" if waits else "")
+        )
     finally:
         context.close()
 
@@ -975,8 +1097,10 @@ def work(job):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="End-to-end tests of web/. By default: Chromium only, no phones; --all "
-                                     "before a commit: the 3 browsers and the phone and tablet profiles.")
+    parser = argparse.ArgumentParser(
+        description="End-to-end tests of web/. By default: Chromium only, no phones; --all "
+        "before a commit: the 3 browsers and the phone and tablet profiles."
+    )
     parser.add_argument("--all", action="store_true", help="chromium, webkit and firefox, and the devices of MOBILE")
     parser.add_argument("--browser", nargs="*", help="chromium, webkit, firefox (default: chromium)")
     parser.add_argument("--devices", nargs="*", help="phone and tablet profiles of Playwright (default: none)")
@@ -984,7 +1108,9 @@ def main():
     parser.add_argument("-j", "--jobs", type=int, default=min(6, os.cpu_count() or 2), help="worker processes")
     parser.add_argument("--headed", action="store_true")
     args = parser.parse_args()
-    browsers = args.browser if args.browser is not None else (["chromium", "webkit", "firefox"] if args.all else ["chromium"])
+    browsers = (
+        args.browser if args.browser is not None else (["chromium", "webkit", "firefox"] if args.all else ["chromium"])
+    )
     devices = args.devices if args.devices is not None else (MOBILE if args.all else [])
     words = (args.k or "").replace(",", " ").split()
     pick = lambda tests: [t.__name__ for t in tests if not words or any(w in t.__name__ for w in words)]  # noqa: E731
@@ -999,11 +1125,17 @@ def main():
     # the jobs: each browser and each device, its tests in chunks (a chunk: one launch of the browser)
     groups = [("browser", b, of(b)) for b in browsers if of(b)] + [("device", d, mobile) for d in devices if mobile]
     size = max(1, math.ceil(sum(len(g[2]) for g in groups) / max(1, args.jobs)))
-    jobs = [(kind, name, names[i : i + size], base, shots, args.headed)
-            for kind, name, names in groups for i in range(0, len(names), size)]
-    print(f"web/ build {version} at {base}: {', '.join(f'{len(of(b))} tests x {b}' for b in browsers)},"
-          f" {len(mobile)} tests x {len(devices)} devices,"
-          f" {len(jobs)} jobs on {args.jobs} processes", flush=True)
+    jobs = [
+        (kind, name, names[i : i + size], base, shots, args.headed)
+        for kind, name, names in groups
+        for i in range(0, len(names), size)
+    ]
+    print(
+        f"web/ build {version} at {base}: {', '.join(f'{len(of(b))} tests x {b}' for b in browsers)},"
+        f" {len(mobile)} tests x {len(devices)} devices,"
+        f" {len(jobs)} jobs on {args.jobs} processes",
+        flush=True,
+    )
     failed, t0 = 0, time.time()
     with ProcessPoolExecutor(max_workers=args.jobs) as pool:
         for done in as_completed([pool.submit(work, job) for job in jobs]):

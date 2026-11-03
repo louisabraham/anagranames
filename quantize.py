@@ -66,10 +66,12 @@ def kmeans(X, w, n_centroids=256, iters=25, seed=0, chunk=2**18):
     C = Xm[mx.array(init)]
     x2 = mx.sum(Xm * Xm, axis=1, keepdims=True)
     for _ in range(iters):
-        assign = mx.concatenate([
-            mx.argmin(x2[i : i + chunk] - 2 * Xm[i : i + chunk] @ C.T + mx.sum(C * C, axis=1), axis=1)
-            for i in range(0, len(X), chunk)
-        ])
+        assign = mx.concatenate(
+            [
+                mx.argmin(x2[i : i + chunk] - 2 * Xm[i : i + chunk] @ C.T + mx.sum(C * C, axis=1), axis=1)
+                for i in range(0, len(X), chunk)
+            ]
+        )
         sums = mx.zeros(C.shape).at[assign].add(Xm * wm[:, None])
         tot = mx.zeros((n_centroids,)).at[assign].add(wm)
         C = mx.where(tot[:, None] > 0, sums / mx.maximum(tot[:, None], 1e-12), C)
@@ -114,8 +116,12 @@ def main():
     parser.add_argument("--data-dir", default="data")
     parser.add_argument("--out", default=None)
     parser.add_argument("--only", default=None, help="run only variants whose name contains this text")
-    parser.add_argument("--save", choices=["int8", "int4", "pq2", "pq4", "pq8"], default=None,
-                        help="instead of the comparison, write <model>_<save>.npz and evaluate that file")
+    parser.add_argument(
+        "--save",
+        choices=["int8", "int4", "pq2", "pq4", "pq8"],
+        default=None,
+        help="instead of the comparison, write <model>_<save>.npz and evaluate that file",
+    )
     args = parser.parse_args()
 
     ds = namedata.load(args.data_dir, args.country)
@@ -135,8 +141,11 @@ def main():
         print(f"saved {path} ({os.path.getsize(path) / 1e6:.1f} MB)", flush=True)
         null, res = pm.evaluate(pm.null_model(ds, alpha), ds), pm.evaluate(pm.load_counts(path, ds, False), ds)
         below = [c for c in ds.countries if res["per_country"][c] > null["per_country"][c]]
-        print(f"  {os.path.basename(path)}: test {res['test_bits']:.4f}  gain {null['test_bits'] - res['test_bits']:+.4f}"
-              f"  {len(below)} countries below null {' '.join(below)}  ({res['eval_s']:.0f}s)", flush=True)
+        print(
+            f"  {os.path.basename(path)}: test {res['test_bits']:.4f}  gain {null['test_bits'] - res['test_bits']:+.4f}"
+            f"  {len(below)} countries below null {' '.join(below)}  ({res['eval_s']:.0f}s)",
+            flush=True,
+        )
         res.update(name=os.path.basename(path), file_mb=os.path.getsize(path) / 1e6, below_null=len(below))
         if args.out:
             with open(args.out, "w") as fh:
@@ -160,9 +169,12 @@ def main():
         results.append(res)
         ref = results[1]["test_bits"] if len(results) > 1 else None
         loss = "" if ref is None else f"  vs fp32 {res['test_bits'] - ref:+.4f}"
-        print(f"  {name:<34} {bytes_per_name:>5.1f} B/name {mb:>8.1f} MB  test {res['test_bits']:.4f}"
-              f"  gain {null['test_bits'] - res['test_bits']:+.4f}{loss}  {below} below null"
-              f"  ({time.time() - t:.0f}s)", flush=True)
+        print(
+            f"  {name:<34} {bytes_per_name:>5.1f} B/name {mb:>8.1f} MB  test {res['test_bits']:.4f}"
+            f"  gain {null['test_bits'] - res['test_bits']:+.4f}{loss}  {below} below null"
+            f"  ({time.time() - t:.0f}s)",
+            flush=True,
+        )
 
     def want(name):
         return not args.only or args.only in name
@@ -182,15 +194,21 @@ def main():
     for group in (2, 4, 8):
         if group < k and want(f"PQ {group} dims/byte"):
             cb = 2 * 256 * k * 4  # codebooks for U and V, float32
-            run(f"PQ {group} dims/byte", *quant(lambda W: product(W, group, cf), lambda W: product(W, group, cl)),
-                k / group, extra_bytes=cb)
+            run(
+                f"PQ {group} dims/byte",
+                *quant(lambda W: product(W, group, cf), lambda W: product(W, group, cl)),
+                k / group,
+                extra_bytes=cb,
+            )
     # Top names only (int4), the other names share their mean vector.
     for frac in (0.5, 0.25, 0.1, 0.05):
         if not want(f"int4, top {frac:.0%} of names"):
             continue
         Ut = on_rows(U4, rf, lambda W: keep_top(W, cf, frac))
         Vt = on_rows(V4, rl, lambda W: keep_top(W, cl, frac))
-        run(f"int4, top {frac:.0%} of names", Ut, Vt, k / 2, int(round(frac * len(rf))) + int(round(frac * len(rl))) + 2)
+        run(
+            f"int4, top {frac:.0%} of names", Ut, Vt, k / 2, int(round(frac * len(rf))) + int(round(frac * len(rl))) + 2
+        )
 
     if args.out:
         with open(args.out, "w") as fh:

@@ -4,9 +4,11 @@ from unidecode import unidecode
 import numpy as np
 from tqdm import tqdm
 
+
 def normalize_name(name):
     """Normalize name using unidecode and removing special chars."""
     return unidecode(name).replace(" ", "").replace("-", "").replace("'", "").upper()
+
 
 def load_french_names(csv_path):
     """Load and process French names from CSV.
@@ -23,15 +25,15 @@ def load_french_names(csv_path):
     print("Loading names from CSV...")
 
     # Count total lines first for progress bar
-    with open(csv_path, 'r', encoding='utf-8') as f:
+    with open(csv_path, "r", encoding="utf-8") as f:
         total_lines = sum(1 for _ in f)
 
     # Count pairs
     pair_counts = Counter()
 
-    with open(csv_path, 'r', encoding='utf-8') as f:
+    with open(csv_path, "r", encoding="utf-8") as f:
         for line in tqdm(f, total=total_lines, desc="Reading CSV", ncols=100):
-            parts = line.strip().split(',')
+            parts = line.strip().split(",")
             if len(parts) < 2:
                 continue
 
@@ -50,7 +52,7 @@ def load_french_names(csv_path):
     print("Building vocabularies...")
     first_set = set()
     last_set = set()
-    for (f, l) in pair_counts:
+    for f, l in pair_counts:
         first_set.add(f)
         last_set.add(l)
 
@@ -70,9 +72,7 @@ def load_french_names(csv_path):
     edge_l = np.zeros(nnz, dtype=np.int32)
     edge_x = np.zeros(nnz, dtype=np.float32)
 
-    for i, ((firstname, lastname), count) in enumerate(
-        tqdm(pair_counts.items(), desc="Building edges", ncols=100)
-    ):
+    for i, ((firstname, lastname), count) in enumerate(tqdm(pair_counts.items(), desc="Building edges", ncols=100)):
         edge_f[i] = first_vocab[firstname]
         edge_l[i] = last_vocab[lastname]
         edge_x[i] = count

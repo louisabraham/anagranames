@@ -55,9 +55,14 @@ def main(src, out):
         if not kept:  # a small country: its largest ring, not simplified
             ring = max(rings, key=area)
             kept = [[v for x, y in ring for v in (round(x * 10), round(y * 10))]]
-        countries.append({"c": code, "n": p["NAME"], "x": round(p["LABEL_X"], 2), "y": round(p["LABEL_Y"], 2), "p": kept})
-    json.dump({"source": "Natural Earth 1:50m admin 0 countries (public domain), simplified", "countries": countries},
-              open(out, "w"), separators=(",", ":"))
+        countries.append(
+            {"c": code, "n": p["NAME"], "x": round(p["LABEL_X"], 2), "y": round(p["LABEL_Y"], 2), "p": kept}
+        )
+    json.dump(
+        {"source": "Natural Earth 1:50m admin 0 countries (public domain), simplified", "countries": countries},
+        open(out, "w"),
+        separators=(",", ":"),
+    )
     points = sum(len(r) // 2 for c in countries for r in c["p"])
     print(f"{out}: {len(countries)} countries, {points} points")
 

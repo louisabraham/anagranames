@@ -138,9 +138,7 @@ def train_step(
     l_neg_flat = l_neg.reshape(-1)  # (B*K,)
     u_neg = params.U[f_neg_flat]  # (B*K,k)
     v_neg = params.V[l_neg_flat]  # (B*K,k)
-    s_neg = (
-        params.a[f_neg_flat] + params.b[l_neg_flat] + jnp.sum(u_neg * v_neg, axis=1)
-    )  # (B*K,)
+    s_neg = params.a[f_neg_flat] + params.b[l_neg_flat] + jnp.sum(u_neg * v_neg, axis=1)  # (B*K,)
     logq_neg = log_qf[f_neg_flat] + log_ql[l_neg_flat]
     logit_neg = (s_neg - logq_neg).reshape(B, K_neg)  # (B,K)
 
@@ -204,30 +202,22 @@ def train_step(
     # 2. Apply adaptive learning rate updates (only for touched rows)
     # lr_adapted = lr / sqrt(G + eps)
     update_U_pos = (-lr * dU_pos / (jnp.sqrt(G_U_new[f_pos]) + eps)).astype(param_dtype)
-    update_U_neg = (-lr * dU_neg / (jnp.sqrt(G_U_new[f_neg_flat]) + eps)).astype(
-        param_dtype
-    )
+    update_U_neg = (-lr * dU_neg / (jnp.sqrt(G_U_new[f_neg_flat]) + eps)).astype(param_dtype)
     U_new = params.U.at[f_pos].add(update_U_pos)
     U_new = U_new.at[f_neg_flat].add(update_U_neg)
 
     update_V_pos = (-lr * dV_pos / (jnp.sqrt(G_V_new[l_pos]) + eps)).astype(param_dtype)
-    update_V_neg = (-lr * dV_neg / (jnp.sqrt(G_V_new[l_neg_flat]) + eps)).astype(
-        param_dtype
-    )
+    update_V_neg = (-lr * dV_neg / (jnp.sqrt(G_V_new[l_neg_flat]) + eps)).astype(param_dtype)
     V_new = params.V.at[l_pos].add(update_V_pos)
     V_new = V_new.at[l_neg_flat].add(update_V_neg)
 
     update_a_pos = (-lr * da_pos / (jnp.sqrt(G_a_new[f_pos]) + eps)).astype(param_dtype)
-    update_a_neg = (-lr * da_neg / (jnp.sqrt(G_a_new[f_neg_flat]) + eps)).astype(
-        param_dtype
-    )
+    update_a_neg = (-lr * da_neg / (jnp.sqrt(G_a_new[f_neg_flat]) + eps)).astype(param_dtype)
     a_new = params.a.at[f_pos].add(update_a_pos)
     a_new = a_new.at[f_neg_flat].add(update_a_neg)
 
     update_b_pos = (-lr * db_pos / (jnp.sqrt(G_b_new[l_pos]) + eps)).astype(param_dtype)
-    update_b_neg = (-lr * db_neg / (jnp.sqrt(G_b_new[l_neg_flat]) + eps)).astype(
-        param_dtype
-    )
+    update_b_neg = (-lr * db_neg / (jnp.sqrt(G_b_new[l_neg_flat]) + eps)).astype(param_dtype)
     b_new = params.b.at[l_pos].add(update_b_pos)
     b_new = b_new.at[l_neg_flat].add(update_b_neg)
 
@@ -250,9 +240,7 @@ def score_pairs(params: Params, f_ids: jax.Array, l_ids: jax.Array):
 # -----------------------------
 # Data loading utilities
 # -----------------------------
-def load_data(
-    edge_f_path="edge_f.npy", edge_l_path="edge_l.npy", edge_x_path="edge_x.npy"
-):
+def load_data(edge_f_path="edge_f.npy", edge_l_path="edge_l.npy", edge_x_path="edge_x.npy"):
     """Load edge lists from .npy files."""
     print("Loading edge lists...")
     edge_f = np.load(edge_f_path)
@@ -349,12 +337,8 @@ def train(
 
     # ---- Marginals for qF, qL ----
     # Use float64 accumulation for stability, then cast down.
-    cf = np.bincount(
-        edge_f.astype(np.int64), weights=edge_x.astype(np.float64), minlength=n
-    )
-    cl = np.bincount(
-        edge_l.astype(np.int64), weights=edge_x.astype(np.float64), minlength=m
-    )
+    cf = np.bincount(edge_f.astype(np.int64), weights=edge_x.astype(np.float64), minlength=n)
+    cl = np.bincount(edge_l.astype(np.int64), weights=edge_x.astype(np.float64), minlength=m)
 
     # Negative sampling distributions (power 0.75)
     qf = np.power(cf + 1e-12, 0.75)
@@ -386,9 +370,7 @@ def train(
 
     U0 = 0.01 * random.normal(k1, (n, k), dtype=dtype)
     V0 = 0.01 * random.normal(k2, (m, k), dtype=dtype)
-    params = Params(
-        U=U0, V=V0, a=jnp.asarray(a0, dtype=dtype), b=jnp.asarray(b0, dtype=dtype)
-    )
+    params = Params(U=U0, V=V0, a=jnp.asarray(a0, dtype=dtype), b=jnp.asarray(b0, dtype=dtype))
 
     # Initialize AdaGrad state (zeros) - use same dtype as params
     adagrad_state = AdaGradState(

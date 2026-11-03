@@ -242,10 +242,14 @@ class Model:
             key = f * self.last.n + l
             order = np.argsort(key)
             cells = ranges(start[order], size[order])
-            self.part_cache[j] = {"key": key[order], "people": np.add.reduceat(count, start)[order],
-                                  "ptr": np.concatenate([[0], np.cumsum(size[order])]),
-                                  "country": country[cells], "count": count[cells],
-                                  "entry_key": np.repeat(key[order], size[order]) * 256 + country[cells]}
+            self.part_cache[j] = {
+                "key": key[order],
+                "people": np.add.reduceat(count, start)[order],
+                "ptr": np.concatenate([[0], np.cumsum(size[order])]),
+                "country": country[cells],
+                "count": count[cells],
+                "entry_key": np.repeat(key[order], size[order]) * 256 + country[cells],
+            }
         return self.part_cache[j]
 
     def real(self, f, l, c=None):
@@ -256,7 +260,11 @@ class Model:
         for p in np.unique(j):
             sel = j == p
             part, k = self.part(int(p)), f[sel] * self.last.n + l[sel]
-            out[sel] = find(part["key"], part["people"], k) if c is None else find(part["entry_key"], part["count"], k * 256 + c)
+            out[sel] = (
+                find(part["key"], part["people"], k)
+                if c is None
+                else find(part["entry_key"], part["count"], k * 256 + c)
+            )
         return out
 
     def real_countries(self, f, l, c=None):
@@ -293,7 +301,10 @@ class Model:
         last name of the pack with the largest probability; None if no split gives two names of the pack."""
         words, best = query.split(), None
         for i in range(1, len(words)):
-            f, l = self.lookup("first", self.key(" ".join(words[:i]))), self.lookup("last", self.key(" ".join(words[i:])))
+            f, l = (
+                self.lookup("first", self.key(" ".join(words[:i]))),
+                self.lookup("last", self.key(" ".join(words[i:]))),
+            )
             if f >= 0 and l >= 0:
                 t = self.log_p(np.array([f]), np.array([l]))[0] + self.log_w
                 if best is None or np.logaddexp.reduce(t) > np.logaddexp.reduce(best):
@@ -364,13 +375,30 @@ class Model:
             keep = (real > 0) | (self.real(f, l, None) == 0)
             f, l, real, lp, best = f[keep], l[keep], real[keep], lp[keep], best[keep]
         top = (np.lexsort((l, f, -lp)) if by_model else np.lexsort((l, f, -lp, -real)))[:limit]
-        results = [{"first": self.first.names[f[i]], "last": self.last.names[l[i]],
-                    "country": self.countries[best[i]], "log_p": float(lp[i]), "real": int(real[i]),
-                    "first_people": int(self.first.total[f[i]]), "first_countries": self.name_countries("first", f[i], c),
-                    "last_people": int(self.last.total[l[i]]), "last_countries": self.name_countries("last", l[i], c),
-                    "real_countries": self.real_countries(f[i], l[i], c)} for i in top]
-        return {"query": query, "country": country, "found": len(f), "real_names": int((real > 0).sum()),
-                "real_people": int(real.sum()), "origin": self.origin(query), "results": results}
+        results = [
+            {
+                "first": self.first.names[f[i]],
+                "last": self.last.names[l[i]],
+                "country": self.countries[best[i]],
+                "log_p": float(lp[i]),
+                "real": int(real[i]),
+                "first_people": int(self.first.total[f[i]]),
+                "first_countries": self.name_countries("first", f[i], c),
+                "last_people": int(self.last.total[l[i]]),
+                "last_countries": self.name_countries("last", l[i], c),
+                "real_countries": self.real_countries(f[i], l[i], c),
+            }
+            for i in top
+        ]
+        return {
+            "query": query,
+            "country": country,
+            "found": len(f),
+            "real_names": int((real > 0).sum()),
+            "real_people": int(real.sum()),
+            "origin": self.origin(query),
+            "results": results,
+        }
 
 
 def one_in(log_p):
@@ -382,8 +410,10 @@ def one_in(log_p):
 
 
 def show(res, source):
-    print(f"{res['query']} ({res['country'] or 'world'}, {source}): {res['found']:,} names, "
-          f"{res['real_names']:,} real with {res['real_people']:,} people")
+    print(
+        f"{res['query']} ({res['country'] or 'world'}, {source}): {res['found']:,} names, "
+        f"{res['real_names']:,} real with {res['real_people']:,} people"
+    )
     if res["origin"] and not res["country"]:
         print("origin: " + ", ".join(f"{o['country']} {o['p']:.0%}" for o in res["origin"]))
     width = max((len(r["first"]) + len(r["last"]) for r in res["results"]), default=0) + 1
@@ -407,9 +437,12 @@ def check(model, path):
     print("largest difference with pairmodel.py, in nats: " + ", ".join(f"{v:.2e} ({k})" for k, v in errors.items()))
     rows = ref["real"]
     by_code = lambda pairs: sorted(map(tuple, pairs))
-    wrong = sum(model.real([r["first"]], [r["last"]])[0] != r["real"]
-                or "countries" in r and by_code(model.real_countries(r["first"], r["last"])) != by_code(r["countries"])
-                for r in rows)
+    wrong = sum(
+        model.real([r["first"]], [r["last"]])[0] != r["real"]
+        or "countries" in r
+        and by_code(model.real_countries(r["first"], r["last"])) != by_code(r["countries"])
+        for r in rows
+    )
     print(f"real full names: {wrong} wrong of {len(rows)} ({sum(r['real'] > 0 for r in rows)} listed)")
     return max(errors.values()) < 1e-4 and wrong == 0
 

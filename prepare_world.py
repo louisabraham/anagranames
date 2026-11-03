@@ -149,10 +149,7 @@ def build_vocab(results, side, min_count):
     key_to_gid = {k: i for i, k in enumerate(kept)}
     displays = [forms[k].most_common(1)[0][0] for k in kept]
     counts = [total[k] for k in kept]
-    maps = [
-        np.array([key_to_gid.get(k, -1) for k in r[f"{side}_keys"]], dtype=np.int32)
-        for r in results
-    ]
+    maps = [np.array([key_to_gid.get(k, -1) for k in r[f"{side}_keys"]], dtype=np.int32) for r in results]
     return kept, displays, counts, maps
 
 
@@ -187,8 +184,11 @@ def main():
     with Pool(args.workers) as pool:
         for i, r in enumerate(pool.imap_unordered(process_country, paths), 1):
             results.append(r)
-            print(f"  [{i:>3}/{len(paths)}] {r['country']}: {r['n_rows']:,} rows, "
-                  f"{r['n'].sum():,} kept, {time.time() - t0:.0f}s", flush=True)
+            print(
+                f"  [{i:>3}/{len(paths)}] {r['country']}: {r['n_rows']:,} rows, "
+                f"{r['n'].sum():,} kept, {time.time() - t0:.0f}s",
+                flush=True,
+            )
     results.sort(key=lambda r: r["country"])
 
     n_rows = sum(r["n_rows"] for r in results)

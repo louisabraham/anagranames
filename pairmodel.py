@@ -185,8 +185,10 @@ def load_counts(path, ds, restrict):
     X, Y = (mx.array(a) for a in namedata.log_marginals(ds, float(d["alpha"])))
     if "a" in d:
         X, Y = X + mx.array(d["a"])[:, None], Y + mx.array(d["b"])[:, None]
-    U, V = (mx.array(dequantize(d, name, n) if f"{name}_codes" in d else d[name])
-            for name, n in (("U", ds.n_first), ("V", ds.n_last)))
+    U, V = (
+        mx.array(dequantize(d, name, n) if f"{name}_codes" in d else d[name])
+        for name, n in (("U", ds.n_first), ("V", ds.n_last))
+    )
     G = mx.array(d["G"]) if "G" in d else None
     B = mx.array(d["B"]) if "B" in d else None
     return Model(X, Y, U, V, G, restrict or G is not None or B is not None, B)
@@ -222,9 +224,25 @@ class PairParams(nn.Module):
             self.G_logit = mx.full((n_countries, k), 4.0)
 
 
-def train_counts(ds, alpha, k=16, K_neg=16, batch=2**16, steps=10000, lr=1e-2, wd=1e-4,
-                 bias=False, neg_uniform=0.0, min_embed=0, gates=False, restrict=False, pool=0, seed=0,
-                 log_every=1000, eval_every=0):
+def train_counts(
+    ds,
+    alpha,
+    k=16,
+    K_neg=16,
+    batch=2**16,
+    steps=10000,
+    lr=1e-2,
+    wd=1e-4,
+    bias=False,
+    neg_uniform=0.0,
+    min_embed=0,
+    gates=False,
+    restrict=False,
+    pool=0,
+    seed=0,
+    log_every=1000,
+    eval_every=0,
+):
     """Learn u, v (and optional a, b, per-country gates G) on top of per-country log counts.
 
     neg_uniform: fraction of negatives whose names come from a uniform draw over the
@@ -334,8 +352,13 @@ def train_counts(ds, alpha, k=16, K_neg=16, batch=2**16, steps=10000, lr=1e-2, w
             pi = people / (people + alpha * g_in)
             start = np.concatenate([[0], np.cumsum(size)[:-1]])
             assert size.max() < 2**31
-            return (mx.array(np.concatenate(names).astype(np.int32)), mx.array(np.concatenate(cums)),
-                    mx.array(start), mx.array(size.astype(np.int32)), mx.array(pi.astype(np.float32)))
+            return (
+                mx.array(np.concatenate(names).astype(np.int32)),
+                mx.array(np.concatenate(cums)),
+                mx.array(start),
+                mx.array(size.astype(np.int32)),
+                mx.array(pi.astype(np.float32)),
+            )
 
         samplers = [support_sampler(ids, n, m) for ids, n, m in ((ds.f, ds.n_first, in_f), (ds.l, ds.n_last, in_l))]
         key = (ds.c.astype(np.int64) << 43) | (ds.f.astype(np.int64) << 22) | ds.l
@@ -354,9 +377,11 @@ def train_counts(ds, alpha, k=16, K_neg=16, batch=2**16, steps=10000, lr=1e-2, w
         pos = mx.searchsorted(cum, mx.random.randint(0, total, (batch,), dtype=mx.int32), side="right")
         c = Cn[pos]
         if pool:
+
             def people_idx():  # (C, n3) triples drawn in proportion to train people
-                return mx.searchsorted(cum, mx.random.randint(c_start[:, None], c_end[:, None], (ds.C, n3)),
-                                       side="right")
+                return mx.searchsorted(
+                    cum, mx.random.randint(c_start[:, None], c_end[:, None], (ds.C, n3)), side="right"
+                )
 
             def triple_idx():  # (C, n3) unique train triples, uniform
                 return t_idx[mx.random.randint(t_start[:, None], t_end[:, None], (ds.C, n3))]
@@ -365,7 +390,9 @@ def train_counts(ds, alpha, k=16, K_neg=16, batch=2**16, steps=10000, lr=1e-2, w
                 names, cums, start, size, pi = sampler
                 r = start[:, None] + mx.random.randint(0, size[:, None], (ds.C, n3)).astype(mx.int64)
                 from_g = names[mx.searchsorted(cums, r, side="right")]
-                return mx.where(mx.random.uniform(shape=(ds.C, n3)) < pi[:, None], names_of_people[people_idx()], from_g)
+                return mx.where(
+                    mx.random.uniform(shape=(ds.C, n3)) < pi[:, None], names_of_people[people_idx()], from_g
+                )
 
             j = people_idx()
             fn = mx.concatenate([F[j], null_idx(F, samplers[0]), F[triple_idx()]], axis=1)
@@ -447,8 +474,11 @@ def tune_alpha(ds, grid=(1, 10, 100, 1000, 10000, 100000, 1000000)):
 def report(name, model, ds, results, null=None, **extra):
     res = {"name": name, **extra, **evaluate(model, ds)}
     gain = "" if null is None else f"  gain {null['test_bits'] - res['test_bits']:+.4f}"
-    print(f"  {name:<36} valid {res['valid_bits']:.4f} test {res['test_bits']:.4f} bits/person{gain}"
-          f"  (eval {res['eval_s']:.0f}s)", flush=True)
+    print(
+        f"  {name:<36} valid {res['valid_bits']:.4f} test {res['test_bits']:.4f} bits/person{gain}"
+        f"  (eval {res['eval_s']:.0f}s)",
+        flush=True,
+    )
     results.append(res)
     return res
 
@@ -471,8 +501,11 @@ def main():
     parser.add_argument("--min-embed", type=int, nargs="+", default=[0])
     parser.add_argument("--eval-every", type=int, default=0)
     parser.add_argument("--gates", action="store_true", help="per-country gates on the interaction")
-    parser.add_argument("--restrict", action="store_true",
-                        help="interaction only between names seen in the country (implied by --gates)")
+    parser.add_argument(
+        "--restrict",
+        action="store_true",
+        help="interaction only between names seen in the country (implied by --gates)",
+    )
     parser.add_argument("--load", nargs="*", default=[], help="evaluate models saved by --save-dir")
     parser.add_argument("--save-dir", default=None, help="save each counts model here")
     parser.add_argument("--alpha", type=float, default=None, help="smoothing of the bases (default: tuned on the data)")
@@ -489,8 +522,8 @@ def main():
         if args.out:
             old = json.load(open(args.out)) if os.path.exists(args.out) else []
             with open(args.out, "w") as fh:
-                json.dump(old + results[len(saved):], fh, indent=1)
-            saved.extend(results[len(saved):])
+                json.dump(old + results[len(saved) :], fh, indent=1)
+            saved.extend(results[len(saved) :])
 
     saved = []
     alpha = args.alpha if args.alpha is not None else tune_alpha(ds)
@@ -511,18 +544,44 @@ def main():
         name += " restricted" if (args.restrict or args.gates or args.pool) else ""
         print(f"  training {name}...", flush=True)
         t = time.time()
-        model, params = train_counts(ds, alpha, k=k, K_neg=args.neg, wd=wd, lr=args.lr, steps=args.steps,
-                                     bias=args.bias, neg_uniform=eps, min_embed=me, gates=args.gates,
-                                     restrict=args.restrict, pool=args.pool, eval_every=args.eval_every)
-        report(name, model, ds, results, null, k=k, wd=wd, neg_uniform=eps, min_embed=me,
-               steps=args.steps, train_s=time.time() - t)
+        model, params = train_counts(
+            ds,
+            alpha,
+            k=k,
+            K_neg=args.neg,
+            wd=wd,
+            lr=args.lr,
+            steps=args.steps,
+            bias=args.bias,
+            neg_uniform=eps,
+            min_embed=me,
+            gates=args.gates,
+            restrict=args.restrict,
+            pool=args.pool,
+            eval_every=args.eval_every,
+        )
+        report(
+            name,
+            model,
+            ds,
+            results,
+            null,
+            k=k,
+            wd=wd,
+            neg_uniform=eps,
+            min_embed=me,
+            steps=args.steps,
+            train_s=time.time() - t,
+        )
         save_results()
         if args.save_dir:
             os.makedirs(args.save_dir, exist_ok=True)
             tag = f"{args.experiment}_{args.country if args.experiment == 'country' else 'all'}"
-            path = (f"{args.save_dir}/{tag}_k{k}_wd{wd:g}_u{eps:g}_me{me}_s{args.steps}"
-                    f"{'_bias' if args.bias else ''}{'_gates' if args.gates else ''}"
-                    f"{f'_pool{args.pool}' if args.pool else ''}.npz")
+            path = (
+                f"{args.save_dir}/{tag}_k{k}_wd{wd:g}_u{eps:g}_me{me}_s{args.steps}"
+                f"{'_bias' if args.bias else ''}{'_gates' if args.gates else ''}"
+                f"{f'_pool{args.pool}' if args.pool else ''}.npz"
+            )
             arrays = {key: np.array(v) for key, v in params.parameters().items()}
             if "G_logit" in arrays:
                 arrays["G"] = np.array(mx.sigmoid(params.G_logit))
