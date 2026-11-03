@@ -116,12 +116,36 @@ $("clear").addEventListener("click", () => {
   go({ q: "" });
   input.focus();
 });
-input.addEventListener("input", (e) => {
-  if (!e.isComposing && input.value !== capital(input.value)) { // not a word in composition (Japanese, Chinese)
-    const [a, b] = [input.selectionStart, input.selectionEnd];
-    input.value = capital(input.value);
-    input.setSelectionRange(a, b);
+// The capital letters as the visitor types: only in the text that the visitor adds (a letter, a paste), and on the
+// letter after it (a space typed in Louisabraham: Louis Abraham). A deletion changes nothing: delete the A of Abc, then
+// type it again, and the field is Abc again (not ABc).
+let before = ""; // the field before the change
+input.addEventListener("beforeinput", () => (before = input.value));
+/** The value with a capital letter on each letter from..to (included) at the start of a word. */
+function capitalIn(value, from, to) {
+  let out = value.slice(0, from);
+  for (let i = from; i < value.length; i++) {
+    const c = value[i], up = c.toUpperCase();
+    const start = i === 0 || /[\s-]/.test(value[i - 1]);
+    out += i <= to && start && c !== up && up.length === 1 ? up : c; // ß: no capital of 2 letters (the caret stays)
   }
+  return out;
+}
+input.addEventListener("input", (e) => {
+  // not a word in composition (Japanese, Chinese); a deletion: no change
+  if (!e.isComposing && e.inputType?.startsWith("insert")) {
+    const now = input.value;
+    let a = 0, b = 0; // the added text: now.slice(a, now.length - b), between the parts of the old value
+    while (a < before.length && a < now.length && before[a] === now[a]) a++;
+    while (b < before.length - a && b < now.length - a && before[before.length - 1 - b] === now[now.length - 1 - b]) b++;
+    const fixed = capitalIn(now, a, now.length - b);
+    if (fixed !== now) {
+      const [x, y] = [input.selectionStart, input.selectionEnd];
+      input.value = fixed;
+      input.setSelectionRange(x, y);
+    }
+  }
+  before = input.value;
   limit = STEP;
   go({ q: input.value });
 });

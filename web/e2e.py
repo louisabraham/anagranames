@@ -228,6 +228,31 @@ def test_type_world(page, base):
     assert any(r["real"] == 1 for r in res), "no full name of 1 person in the reference"
 
 
+def test_capitals(page, base):
+    """A capital letter at the start of each word, only on the text that the visitor adds: delete the A of Abc, then
+    type it again: Abc (not ABc); a space typed in a word gives a capital letter to the next word; a paste too."""
+    start(page, base)
+    field = page.locator("#q")
+    value = lambda: page.input_value("#q")  # noqa: E731
+    caret = lambda i: page.evaluate(f"document.getElementById('q').setSelectionRange({i}, {i})")  # noqa: E731
+    field.press_sequentially("abc", delay=20)
+    assert value() == "Abc", value()
+    caret(1)
+    page.keyboard.press("Backspace")
+    assert value() == "bc", f"a deletion changes the other letters: {value()!r}"
+    caret(0)
+    page.keyboard.type("a")
+    assert value() == "Abc", f"the A again: {value()!r}"
+    page.fill("#q", "")
+    field.press_sequentially("louisabraham", delay=20)
+    caret(5)
+    page.keyboard.type(" ")
+    assert value() == "Louis Abraham", f"a space in a word: {value()!r}"
+    page.fill("#q", "")
+    page.keyboard.insert_text("jean-paul sartre")  # as a paste
+    assert value() == "Jean-Paul Sartre", f"a paste: {value()!r}"
+
+
 def test_address(page, base):
     """A shared address opens its view without typing, and the address bar is cleaned: a name, a country, the real
     people only (&real). Without &real: the synthetic people (the default). The addresses of the old pages
@@ -821,6 +846,7 @@ def test_error_shown(page, base):
 TESTS = [
     test_about,
     test_type_world,
+    test_capitals,
     test_address,
     test_switch,
     test_country,
@@ -849,6 +875,7 @@ TESTS = [
 # scroll, canvas, Intl): the search and the numbers come from the same code in all browsers.
 ENGINE = {
     test_about,
+    test_capitals,
     test_names_whole,
     test_keyboard,
     test_keys,
