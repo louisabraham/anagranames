@@ -410,8 +410,8 @@ h1 .term[aria-expanded="true"] {
   text-transform: uppercase;
 }
 
-/* the text of a first visit, under the question (app.js: while no name gives people): what the page does, the two
-   kinds of names, with the labels of the list, and names to try */
+/* the text of a first visit, under the question (app.js: while no name gives people): what the page does, the label
+   of the real names in the list, and names to try */
 .about {
   display: grid;
   gap: 16px;
@@ -433,28 +433,30 @@ h1 .term[aria-expanded="true"] {
   padding: 0;
   list-style: none;
 }
-.legend li .tag {
+.legend li .tag { /* centered on the text and its letters centered in the box (the text is larger: not on its baseline) */
   display: inline-block;
   margin-right: 6px;
-  padding: 0 6px;
+  padding: 2px 6px;
   font-size: 12px;
+  line-height: 1;
+  vertical-align: 0.125em;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.tag.synthetic { /* as the bars of the synthetic people: an outline */
-  border: 1px solid var(--phos);
-  color: var(--phos);
-  text-shadow: var(--glow);
-}
-.about .try {
+.about .try { /* the names wrap under the first name, not under "Try" */
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
   font-size: 13px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.about .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .chip {
