@@ -484,33 +484,26 @@ input.addEventListener("keydown", (e) => {
   goTo($("hist"), firstCountry());
 });
 
-// On a phone, the globe and the list of the countries start folded: a tap on the message opens the globe, a tap on the
-// header of the countries opens their list (a tap again: folds). The headers say it to screen readers (a button, open
-// or not); on a computer, they do nothing.
+// On a phone, the list of the countries starts folded: a tap on its header opens it (a tap again: folds). The header
+// says it to screen readers (a button, open or not); on a computer, it does nothing. The globe is always open.
 const phone = matchMedia("(max-width: 699px)");
 const fold = {
-  panes: { tally: () => document.querySelector(".globe-pane"), hist: () => $("hist") },
-  heads: { tally: () => $("tally"), hist: () => document.querySelector("#hist .pane-head") },
-  /** The state of the headers: a button on a phone, open or not. */
+  /** The state of the header: a button on a phone, open or not. */
   mark() {
-    for (const k of ["tally", "hist"]) {
-      const head = fold.heads[k]();
-      if (!head) continue;
-      if (phone.matches) {
-        head.setAttribute("role", "button");
-        head.setAttribute("aria-expanded", String(!fold.panes[k]().classList.contains("folded")));
-      } else ["role", "aria-expanded"].forEach((a) => head.removeAttribute(a));
-    }
+    const head = document.querySelector("#hist .pane-head");
+    if (!head) return;
+    if (phone.matches) {
+      head.setAttribute("role", "button");
+      head.setAttribute("aria-expanded", String(!$("hist").classList.contains("folded")));
+    } else ["role", "aria-expanded"].forEach((a) => head.removeAttribute(a));
   },
 };
-for (const k of ["tally", "hist"]) {
-  fold.panes[k]().addEventListener("click", (e) => {
-    if (!phone.matches || !e.target.closest(k === "tally" ? "#tally" : "#hist .pane-head")) return;
-    fold.panes[k]().classList.toggle("folded");
-    fold.mark();
-  });
-}
-if (phone.matches) for (const k of ["tally", "hist"]) fold.panes[k]().classList.add("folded");
+$("hist").addEventListener("click", (e) => {
+  if (!phone.matches || !e.target.closest("#hist .pane-head")) return;
+  $("hist").classList.toggle("folded");
+  fold.mark();
+});
+if (phone.matches) $("hist").classList.add("folded");
 phone.addEventListener("change", fold.mark);
 fold.mark();
 

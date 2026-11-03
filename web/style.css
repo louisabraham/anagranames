@@ -522,14 +522,12 @@ h1 .term[aria-expanded="true"] {
     flex: none;
     height: 270px;
   }
-  /* a tap on the message, or on the header of the countries, folds the globe or the list: an arrow says it */
-  #tally,
+  /* a tap on the header of the countries folds their list: an arrow says it */
   #hist .pane-head {
     position: relative;
     padding-right: 30px;
     cursor: pointer;
   }
-  #tally::after,
   #hist .pane-head::after {
     content: "▾";
     position: absolute;
@@ -537,16 +535,13 @@ h1 .term[aria-expanded="true"] {
     right: 8px;
     color: var(--phos);
   }
-  .globe-pane.folded #tally::after,
   #hist.folded .pane-head::after {
     content: "▸";
   }
-  .globe-pane.folded .globe,
   #hist.folded .pane-body,
   #hist.folded .sbar {
     display: none !important;
   }
-  .globe-pane.folded #tally,
   #hist.folded .pane-head {
     margin-bottom: 12px;
     border-bottom: 0;

@@ -795,7 +795,7 @@ LAYOUT = [("empty", "/", "document.body.dataset.ready"),
 
 def test_mobile_layout(page, base):
     """For each view: no part wider than the screen, text of 16 px at least in the fields (else iOS zooms in),
-    controls of 44 px and links of 32 px at least for a finger, on a phone the globe and the countries folded at first,
+    controls of 44 px and links of 32 px at least for a finger, on a phone the countries folded at first (the globe open),
     the globe in its box (opened), the top bar at the top after a scroll."""
     for name, url, ready in LAYOUT:
         page.goto(base + url)
@@ -810,10 +810,9 @@ def test_mobile_layout(page, base):
         assert not m["controls"], f"{name}: controls smaller than 44 px: {m['controls'][:6]}"
         assert not m["links"], f"{name}: links smaller than 32 px: {m['links'][:6]}"
         if ready == READY:
-            if m["vw"] < 700:  # a phone: the globe and the list of the countries start folded
+            if m["vw"] < 700:  # a phone: the list of the countries starts folded, the globe open
                 folded = page.evaluate("['.globe-pane', '#hist'].map((s) => document.querySelector(s).classList.contains('folded'))")
-                assert folded == [True, True], f"{name}: on a phone, folded at first (globe, countries): {folded}"
-                page.tap("#tally")
+                assert folded == [False, True], f"{name}: on a phone, folded at first (globe, countries): {folded}"
             check_globe(page, name)
         page.evaluate("scrollTo(0, document.scrollingElement.scrollHeight)")
         page.wait_for_timeout(300)
@@ -856,8 +855,7 @@ def test_mobile_globe(page, base):
     start(page, base, "Yuki Tanaka")
     check_list(page, "world", "Yuki Tanaka")
     wait_hist(page)
-    if page.viewport_size["width"] < 700:  # a phone: open the globe and the list (folded at first)
-        page.tap("#tally")
+    if page.viewport_size["width"] < 700:  # a phone: open the list of the countries (folded at first)
         page.tap("#hist .pane-head")
         height = page.evaluate("document.getElementById('hist').getBoundingClientRect().height")
         assert height <= 300, f"the list of the countries is {height:.0f} px high on a phone"
@@ -892,34 +890,33 @@ def test_mobile_globe(page, base):
 
 
 def test_mobile_fold(page, base):
-    """On a phone, the globe and the list of the countries start folded; a tap on the message opens the globe (drawn),
-    a tap on the header of the countries opens their list, and a tap again folds them; the list stays folded when it
-    changes (the switch). On a tablet, they are open and a tap does nothing."""
+    """On a phone, the list of the countries starts folded; the globe is open (drawn), and a tap on the message does
+    not fold it. A tap on the header of the countries opens their list, and a tap again folds it; the list stays folded
+    when it changes (the switch). On a tablet, the list is open and a tap does nothing."""
     start(page, base, "Yuki Tanaka")
     check_list(page, "world", "Yuki Tanaka")
     wait_hist(page)
     phone = page.viewport_size["width"] < 700
-
-    def hidden():
-        return [page.locator("#globe").is_hidden(), page.locator("#hist .pane-body").is_hidden()]
-
-    assert hidden() == [phone, phone], f"at first, hidden (globe, countries): {hidden()}, phone: {phone}"
+    folded = lambda: page.locator("#hist .pane-body").is_hidden()  # noqa: E731
+    assert folded() == phone, f"at first, the countries folded: {folded()}, phone: {phone}"
+    check_globe(page, "at first")
     page.tap("#tally")
+    page.wait_for_timeout(300)
+    assert page.locator("#globe").is_visible(), "a tap on the message folds the globe"
+    assert page.get_attribute("#tally", "role") is None, "the message is a button"
     page.tap("#hist .pane-head")
     page.wait_for_timeout(300)
-    assert hidden() == [False, False], f"after a tap on the headers, hidden (globe, countries): {hidden()}, phone: {phone}"
+    assert not folded(), f"after a tap on the header, the countries are folded (phone: {phone})"
     if not phone:
         return
-    assert page.get_attribute("#tally", "aria-expanded") == "true", "the message does not say that the globe is open"
-    check_globe(page, "opened")
-    page.tap("#tally")
+    assert page.get_attribute("#hist .pane-head", "aria-expanded") == "true", "the header does not say that the list is open"
     page.tap("#hist .pane-head")
     page.wait_for_timeout(300)
-    assert hidden() == [True, True], f"a tap again does not fold them: hidden (globe, countries): {hidden()}"
-    assert page.get_attribute("#tally", "aria-expanded") == "false", "the message does not say that the globe is folded"
+    assert folded(), "a tap again does not fold the countries"
+    assert page.get_attribute("#hist .pane-head", "aria-expanded") == "false", "the header does not say that the list is folded"
     page.tap("#synthetic")
     check_list(page, "world", "Yuki Tanaka", synthetic=True)
-    assert page.locator("#hist .pane-body").is_hidden(), "the list of the countries opens again when it changes"
+    assert folded(), "the list of the countries opens again when it changes"
 
 
 MOBILE_TESTS = [test_mobile_layout, test_mobile_flow, test_mobile_globe, test_mobile_fold]
