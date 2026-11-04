@@ -53,7 +53,8 @@
           5.2 million names fit in one file of 9.2 MB, which the browser keeps in memory and searches in a few
           milliseconds. The letters go from the rarest to the most common, so that the search cuts most branches at the
           top.</li>
-        <li><b>A small model:</b> to keep the synthetic anagranames interesting, a simple machine learning model
+        <li><b>Quantized ranking model:</b> to keep the synthetic anagranames interesting, a simple machine learning
+          model
           inspired by <a href="https://d2l.ai/chapter_recommender-systems/fm.html">factorization machines</a> ranks
           them. We train it with <a href="https://ml-explore.github.io/mlx/build/html/index.html">MLX</a> in less than 3
           minutes on my MacBook Pro, on 353 million people. Then we quantize its vectors to 4 bits per number, so that
