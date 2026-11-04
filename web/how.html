@@ -38,6 +38,36 @@
     <h1>How it works</h1>
 
     <section>
+      <h2>Cool tricks</h2>
+      <p>This project uses many nice algorithms and technologies. The rest of the page explains them in detail; here are
+        my favorites.</p>
+      <ul>
+        <li><b>Meet-in-the-middle:</b> the page looks for anagrams in all the pairs of a first name and a last name, 1.7
+          million × 3.5 million = 6 trillion pairs. To find the pairs of two lists that match a target is a <a
+            href="https://leetcode.com/problems/number-of-pairs-of-strings-with-concatenation-equal-to-target/description/">classic</a>
+          algorithmic problem, and a nice example of the <a
+            href="https://en.wikipedia.org/wiki/Meet-in-the-middle_attack">meet-in-the-middle</a> <a
+            href="https://www.geeksforgeeks.org/dsa/meet-in-the-middle/">technique</a>: for each first name that fits in
+          your letters, the letters that stay give the last names.</li>
+        <li><b>Tries:</b> the first and last names go in two <a href="https://en.wikipedia.org/wiki/Trie">tries</a>. The
+          5.2 million names fit in one file of 9.2 MB, which the browser keeps in memory and searches in a few
+          milliseconds. The letters go from the rarest to the most common, so that the search cuts most branches at the
+          top.</li>
+        <li><b>A small model:</b> to keep the synthetic anagranames interesting, a simple machine learning model
+          inspired by <a href="https://d2l.ai/chapter_recommender-systems/fm.html">factorization machines</a> ranks
+          them. We train it with <a href="https://ml-explore.github.io/mlx/build/html/index.html">MLX</a> in less than 3
+          minutes on my MacBook Pro, on 353 million people. Then we quantize its vectors to 4 bits per number, so that
+          the full model takes only 11 MB.</li>
+        <li><b>Permutation-invariant hashing:</b> the real anagranames come from the list of the 155 million real full
+          names, 465 MB in gzip:
+          too much for a browser. So we put the full names in 4,096 buckets by a checksum that stays the same when the
+          letters change order. All the anagrams of your name are in one bucket, and the page downloads only this bucket
+          (113 KB on average).</li>
+      </ul>
+      <p>The <a href="https://github.com/louisabraham/anagranames">full code</a> is on GitHub, with the MIT license.</p>
+    </section>
+
+    <section>
       <h2>What data do you use?</h2>
       <ul>
         <li><b>Names:</b> <a href="https://github.com/philipperemy/name-dataset">name_dataset</a>
@@ -186,7 +216,7 @@
       <h2>How do the data and the model fit in a browser?</h2>
       <ul>
         <li><b>Vectors:</b> the 1.34 million vectors take 86 MB in 32-bit numbers. With
-          <a href="https://www.irisa.fr/texmex/people/jegou/papers/jegou_searching_with_quantization.pdf">product
+          <a href="https://inria.hal.science/inria-00514462v2/document">product
             quantization</a>, each pair of numbers becomes one byte: the index of the nearest of 256 learned pairs. They
           take
           11 MB, and the model needs less than 0.01 bits per person more.
@@ -204,12 +234,6 @@
       <p>The browser keeps the files for the next searches. The search and the model run in your browser: the page does
         not
         send your name.</p>
-    </section>
-
-    <section>
-      <h2>Where is the source code?</h2>
-      <p>On GitHub: <a href="https://github.com/louisabraham/anagranames">louisabraham/anagranames</a>, with the MIT
-        license.</p>
     </section>
   </main>
   <footer class="credit">Made with <span aria-label="love">❤️</span> by <a href="https://louisabraham.github.io/">Louis
